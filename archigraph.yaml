@@ -2004,16 +2004,16 @@ nodes:
   name: Manifold WASM Module
   x:
     native:
-      language: C++
+      language: TypeScript (stub — WASM not installed)
       api: N-API
       reason: Manifold geometry kernel provides robust, fast CSG boolean operations. Compiled to WebAssembly for cross-platform
-        compatibility without native compilation. C++ implementation is 10-100x faster than pure JavaScript for boolean operations
+        compatibility without native compilation. The upstream C++ library (compiled to WASM) would be 10-100x faster than pure JavaScript for boolean operations
         on complex meshes.
     perf:
       critical: true
       optimizations: WASM SIMD instructions, pre-allocated memory pools, batch operation API
     impl:
-      language: C++
+      language: TypeScript
       complexity: complex
       status: stub
     docs:
@@ -2217,7 +2217,7 @@ nodes:
   name: OpenCascade WASM Module
   x:
     native:
-      language: C++
+      language: TypeScript (stub — WASM not installed)
       api: N-API
       reason: OpenCascade Technology (OCCT) provides STEP/IGES file parsing and B-Rep kernel for importing mechanical CAD
         data. Compiled to WASM for cross-platform. Required because STEP is a complex format that cannot be reasonably parsed
@@ -2226,7 +2226,7 @@ nodes:
       critical: true
       optimizations: WASM compilation with SIMD, selective module loading (only import-related APIs)
     impl:
-      language: C++
+      language: TypeScript
       complexity: complex
       status: stub
     docs:
