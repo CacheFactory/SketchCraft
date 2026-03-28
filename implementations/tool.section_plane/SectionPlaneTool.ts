@@ -1,0 +1,84 @@
+// @archigraph tool.section_plane
+// Section plane tool: click on a face to place a section cutting plane
+
+import type { Vec3 } from '../../src/core/types';
+import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
+import { vec3 } from '../../src/core/math';
+import { BaseTool } from '../tool.select/BaseTool';
+
+export class SectionPlaneTool extends BaseTool {
+  readonly id = 'tool.section_plane';
+  readonly name = 'Section Plane';
+  readonly icon = 'scissors';
+  readonly shortcut = 'Shift+S';
+  readonly category = 'construct' as const;
+  readonly cursor = 'crosshair';
+
+  activate(): void {
+    super.activate();
+    this.setStatus('Click on a face to place a section plane aligned to its normal.');
+  }
+
+  deactivate(): void {
+    super.deactivate();
+  }
+
+  onMouseDown(event: ToolMouseEvent): void {
+    if (event.button !== 0) return;
+    const point = this.resolvePoint(event);
+    if (!point) return;
+
+    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
+    let normal: Vec3 = { x: 0, y: 1, z: 0 };
+
+    for (const hit of hits) {
+      const face = this.document.geometry.getFace(hit.entityId);
+      if (face) {
+        normal = vec3.clone(face.normal);
+        break;
+      }
+    }
+
+    // Create a visual representation of the section plane as guide lines
+    // forming a cross/rectangle at the placement point
+    const size = 50;
+    let tangent: Vec3;
+    if (Math.abs(normal.y) > 0.9) {
+      tangent = vec3.normalize(vec3.cross(normal, { x: 1, y: 0, z: 0 }));
+    } else {
+      tangent = vec3.normalize(vec3.cross(normal, { x: 0, y: 1, z: 0 }));
+    }
+    const bitangent = vec3.normalize(vec3.cross(normal, tangent));
+
+    const id = `section-${Date.now()}`;
+    const p1 = vec3.add(point, vec3.add(vec3.mul(tangent, size), vec3.mul(bitangent, size)));
+    const p2 = vec3.add(point, vec3.add(vec3.mul(tangent, -size), vec3.mul(bitangent, size)));
+    const p3 = vec3.add(point, vec3.add(vec3.mul(tangent, -size), vec3.mul(bitangent, -size)));
+    const p4 = vec3.add(point, vec3.add(vec3.mul(tangent, size), vec3.mul(bitangent, -size)));
+
+    const color = { r: 1, g: 0.5, b: 0, a: 0.6 };
+    this.viewport.renderer.addGuideLine(`${id}-1`, p1, p2, color, false);
+    this.viewport.renderer.addGuideLine(`${id}-2`, p2, p3, color, false);
+    this.viewport.renderer.addGuideLine(`${id}-3`, p3, p4, color, false);
+    this.viewport.renderer.addGuideLine(`${id}-4`, p4, p1, color, false);
+
+    this.setStatus('Section plane placed. Click again to place another.');
+  }
+
+  onMouseMove(event: ToolMouseEvent): void {
+    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
+    if (hits.length > 0) {
+      this.document.selection.setPreSelection(hits[0].entityId);
+    } else {
+      this.document.selection.setPreSelection(null);
+    }
+  }
+
+  onKeyDown(event: ToolKeyEvent): void {
+    if (event.key === 'Escape') {
+      this.setPhase('idle');
+    }
+  }
+
+  getVCBLabel(): string { return ''; }
+}

@@ -13,21 +13,11 @@
     "declarationMap": false,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
-    "baseUrl": "./src",
+    "baseUrl": ".",
     "paths": {
-      "@core/*": ["core/*"],
-      "@main/*": ["main/*"],
-      "@renderer/*": ["renderer/*"],
-      "@tools/*": ["tools/*"],
-      "@engine/*": ["engine/*"],
-      "@data/*": ["data/*"],
-      "@operations/*": ["operations/*"],
-      "@shaders/*": ["shaders/*"],
-      "@workers/*": ["workers/*"],
-      "@file/*": ["file/*"]
+      "@core/*": ["src/core/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "implementations/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
 }

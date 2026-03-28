@@ -3,8 +3,8 @@ const path = require('path');
 module.exports = {
   mode: 'development',
   entry: {
-    main: './src/main/main.ts',
-    preload: './src/main/preload.ts',
+    main: './implementations/process.main/main.ts',
+    preload: './implementations/process.main/preload.ts',
   },
   target: 'electron-main',
   module: {
