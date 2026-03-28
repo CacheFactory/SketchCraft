@@ -1,0 +1,208 @@
+// @archigraph tool.pushpull
+// Push/Pull tool: click a face, drag to extrude it into a 3D solid.
+// Creates side faces + top cap. Like SketchUp's signature tool.
+
+import type { Vec3 } from '../core/types';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace } from '../core/interfaces';
+import { vec3 } from '../core/math';
+import { BaseTool } from './BaseTool';
+
+export class PushPullTool extends BaseTool {
+  readonly id = 'tool.pushpull';
+  readonly name = 'Push/Pull';
+  readonly icon = 'box';
+  readonly shortcut = 'P';
+  readonly category = 'modify' as const;
+  readonly cursor = 'ns-resize';
+
+  private selectedFaceId: string | null = null;
+  private faceNormal: Vec3 | null = null;
+  private startScreenY = 0;
+  private currentDistance = 0;
+
+  activate(): void {
+    super.activate();
+    this.reset();
+
+    // SketchUp behavior: if a face is already selected, start Push/Pull on it
+    const selectedIds = this.resolveSelectedEntityIds();
+    if (selectedIds.length === 1) {
+      const face = this.document.geometry.getFace(selectedIds[0]);
+      if (face) {
+        this.startOnFace(face, 0);
+        this.setStatus('Move mouse up/down to extrude, then click. Or type a distance.');
+        return;
+      }
+    }
+
+    this.setStatus('Click on a face to push/pull.');
+  }
+
+  deactivate(): void {
+    if (this.phase !== 'idle') this.abortTransaction();
+    this.reset();
+    super.deactivate();
+  }
+
+  onMouseDown(event: ToolMouseEvent): void {
+    if (event.button !== 0) return;
+
+    if (this.phase === 'idle') {
+      // Use pre-computed raycast hit from the event
+      if (event.hitEntityId) {
+        const face = this.document.geometry.getFace(event.hitEntityId);
+        if (face) {
+          this.startOnFace(face, event.screenY);
+          this.setStatus('Move mouse up/down to set distance, then click to commit.');
+          return;
+        }
+      }
+      this.setStatus('No face found. Click directly on a face.');
+    } else if (this.phase === 'drawing') {
+      // Commit the extrusion
+      this.commitExtrusion();
+    }
+  }
+
+  onMouseMove(event: ToolMouseEvent): void {
+    if (this.phase !== 'drawing' || !this.faceNormal) return;
+
+    // Use screen-space Y movement to determine extrusion distance.
+    // Moving mouse up = positive extrusion (along normal).
+    // Scale: 1 pixel ~= 0.05 world units (adjustable feel).
+    const deltaPixels = this.startScreenY - event.screenY; // up = positive
+    this.currentDistance = deltaPixels * 0.05;
+    this.setVCBValue(this.currentDistance.toFixed(3));
+    this.setStatus(`Distance: ${this.currentDistance.toFixed(3)} m. Click to commit.`);
+  }
+
+  onKeyDown(event: ToolKeyEvent): void {
+    if (event.key === 'Escape') {
+      if (this.phase !== 'idle') this.abortTransaction();
+      this.reset();
+      this.setStatus('Click on a face to push/pull.');
+    }
+  }
+
+  onVCBInput(value: string): void {
+    if (this.phase !== 'drawing') return;
+
+    const dist = this.parseDistance(value);
+    if (isNaN(dist) || dist === 0) return;
+
+    this.currentDistance = dist;
+    this.commitExtrusion();
+  }
+
+  getVCBLabel(): string {
+    return this.phase === 'drawing' ? 'Distance' : '';
+  }
+
+  getPreview(): ToolPreview | null {
+    if (this.phase !== 'drawing' || !this.selectedFaceId || !this.faceNormal || Math.abs(this.currentDistance) < 0.001) return null;
+
+    const verts = this.document.geometry.getFaceVertices(this.selectedFaceId);
+    if (verts.length < 3) return null;
+
+    const offset = vec3.mul(this.faceNormal, this.currentDistance);
+
+    // Show the top face outline at the extruded position
+    const topPoints = verts.map(v => vec3.add(v.position, offset));
+
+    // Also show vertical guide lines from original to extruded
+    const lines = verts.map(v => ({
+      from: v.position,
+      to: vec3.add(v.position, offset),
+    }));
+
+    return { polygon: topPoints, lines };
+  }
+
+  // ── Private ────────────────────────────────────────────
+
+  private startOnFace(face: IFace, screenY: number): void {
+    this.selectedFaceId = face.id;
+
+    // Ensure normal points "outward" — for a ground plane face (Y normal),
+    // we want push to go up (positive Y)
+    let normal = vec3.clone(face.normal);
+    // Normalize just in case
+    const len = vec3.length(normal);
+    if (len > 0) normal = vec3.div(normal, len);
+    this.faceNormal = normal;
+
+    this.startScreenY = screenY;
+    this.currentDistance = 0;
+    this.beginTransaction('Push/Pull');
+    this.setPhase('drawing');
+  }
+
+  private reset(): void {
+    this.selectedFaceId = null;
+    this.faceNormal = null;
+    this.startScreenY = 0;
+    this.currentDistance = 0;
+    this.setPhase('idle');
+    this.setVCBValue('');
+  }
+
+  private commitExtrusion(): void {
+    if (!this.selectedFaceId || !this.faceNormal || Math.abs(this.currentDistance) < 1e-10) {
+      this.abortTransaction();
+      this.reset();
+      this.setStatus('Push/Pull cancelled (zero distance). Click on a face.');
+      return;
+    }
+
+    const faceVertices = this.document.geometry.getFaceVertices(this.selectedFaceId);
+    if (faceVertices.length < 3) {
+      this.abortTransaction();
+      this.reset();
+      this.setStatus('Invalid face. Click on a face to push/pull.');
+      return;
+    }
+
+    const offset = vec3.mul(this.faceNormal, this.currentDistance);
+
+    // 1. Create new vertices at the extruded position (the "top" of the box)
+    const newVertexIds: string[] = [];
+    for (const v of faceVertices) {
+      const newPos = vec3.add(v.position, offset);
+      const newVertex = this.document.geometry.createVertex(newPos);
+      newVertexIds.push(newVertex.id);
+    }
+
+    // 2. Create side faces connecting original face edges to new vertices
+    const n = faceVertices.length;
+    for (let i = 0; i < n; i++) {
+      const next = (i + 1) % n;
+      const bottomA = faceVertices[i].id;
+      const bottomB = faceVertices[next].id;
+      const topA = newVertexIds[i];
+      const topB = newVertexIds[next];
+
+      // Create the 4 edges of this side quad
+      this.document.geometry.createEdge(bottomA, topA);
+      this.document.geometry.createEdge(topA, topB);
+      // bottomA->bottomB edge already exists (part of original face)
+      // Only create bottomB->topB if it's the last side (otherwise next iteration creates it)
+      if (i === n - 1) {
+        this.document.geometry.createEdge(bottomB, topB);
+      }
+
+      // Create side quad face
+      // Winding: bottom-left, bottom-right, top-right, top-left
+      this.document.geometry.createFace([bottomA, bottomB, topB, topA]);
+    }
+
+    // 3. Create top cap face (the extruded copy of the original face)
+    this.document.geometry.createFace(newVertexIds);
+
+    // 4. The original bottom face remains (it's the bottom of the box)
+
+    this.commitTransaction();
+    this.document.selection.clear();
+    this.reset();
+    this.setStatus('Extrusion complete! Click another face or press P again.');
+  }
+}

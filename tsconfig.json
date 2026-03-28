@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": "./src",
+    "paths": {
+      "@core/*": ["core/*"],
+      "@main/*": ["main/*"],
+      "@renderer/*": ["renderer/*"],
+      "@tools/*": ["tools/*"],
+      "@engine/*": ["engine/*"],
+      "@data/*": ["data/*"],
+      "@operations/*": ["operations/*"],
+      "@shaders/*": ["shaders/*"],
+      "@workers/*": ["workers/*"],
+      "@file/*": ["file/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

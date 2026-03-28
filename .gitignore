@@ -1,0 +1,7 @@
+node_modules/
+dist/
+test-results/
+*.obj
+*.sketch
+.DS_Store
+settings.yaml
