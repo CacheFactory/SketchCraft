@@ -30,6 +30,7 @@ export function MeasurementsBar() {
     const handler = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       if (/^[0-9.,\-]$/.test(e.key) && inputRef.current) {
+        e.preventDefault(); // Prevent the browser from also inserting the character
         inputRef.current.focus();
         inputRef.current.value = e.key === '.' ? '0.' : e.key;
       }

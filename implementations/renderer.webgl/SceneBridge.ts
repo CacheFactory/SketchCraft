@@ -431,6 +431,42 @@ export class SceneBridge {
       }
     });
 
+    // Check edge-edge intersection points
+    const edgeArray = Array.from(mesh.edges.values());
+    for (let i = 0; i < edgeArray.length; i++) {
+      const e1 = edgeArray[i];
+      const a1 = mesh.vertices.get(e1.startVertexId);
+      const a2 = mesh.vertices.get(e1.endVertexId);
+      if (!a1 || !a2) continue;
+
+      for (let j = i + 1; j < edgeArray.length; j++) {
+        const e2 = edgeArray[j];
+        const b1 = mesh.vertices.get(e2.startVertexId);
+        const b2 = mesh.vertices.get(e2.endVertexId);
+        if (!b1 || !b2) continue;
+
+        // Skip if edges share a vertex (they meet at an endpoint, already snappable)
+        if (e1.startVertexId === e2.startVertexId || e1.startVertexId === e2.endVertexId ||
+            e1.endVertexId === e2.startVertexId || e1.endVertexId === e2.endVertexId) continue;
+
+        // Find closest point between two line segments
+        const intersection = this.edgeEdgeIntersection(
+          a1.position, a2.position, b1.position, b2.position
+        );
+        if (!intersection) continue;
+
+        const screenPos = camera.worldToScreen(intersection, viewportWidth, viewportHeight);
+        const dx = screenPos.x - screenX;
+        const dy = screenPos.y - screenY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < snapRadiusPx && dist < bestDist) {
+          bestDist = dist;
+          bestPoint = intersection;
+        }
+      }
+    }
+
     if (bestPoint) {
       this.showSnapMarker(bestPoint, camera);
       return bestPoint;
@@ -484,6 +520,55 @@ export class SceneBridge {
 
   get isSnapped(): boolean {
     return this.snapActive;
+  }
+
+  /**
+   * Find the intersection point of two 3D line segments, if they intersect
+   * or nearly intersect (within tolerance). Returns null if no intersection.
+   */
+  private edgeEdgeIntersection(
+    a1: { x: number; y: number; z: number }, a2: { x: number; y: number; z: number },
+    b1: { x: number; y: number; z: number }, b2: { x: number; y: number; z: number },
+  ): { x: number; y: number; z: number } | null {
+    const TOLERANCE = 0.05;
+
+    // Direction vectors
+    const da = { x: a2.x - a1.x, y: a2.y - a1.y, z: a2.z - a1.z };
+    const db = { x: b2.x - b1.x, y: b2.y - b1.y, z: b2.z - b1.z };
+    const w = { x: a1.x - b1.x, y: a1.y - b1.y, z: a1.z - b1.z };
+
+    const a = da.x * da.x + da.y * da.y + da.z * da.z;
+    const b = da.x * db.x + da.y * db.y + da.z * db.z;
+    const c = db.x * db.x + db.y * db.y + db.z * db.z;
+    const d = da.x * w.x + da.y * w.y + da.z * w.z;
+    const e = db.x * w.x + db.y * w.y + db.z * w.z;
+
+    const denom = a * c - b * b;
+    if (Math.abs(denom) < 1e-10) return null; // Parallel
+
+    const s = (b * e - c * d) / denom;
+    const t = (a * e - b * d) / denom;
+
+    // Must be within segment bounds (0 to 1), with small tolerance
+    if (s < -0.01 || s > 1.01 || t < -0.01 || t > 1.01) return null;
+
+    // Points on each line closest to the other
+    const pa = { x: a1.x + s * da.x, y: a1.y + s * da.y, z: a1.z + s * da.z };
+    const pb = { x: b1.x + t * db.x, y: b1.y + t * db.y, z: b1.z + t * db.z };
+
+    // Distance between closest points
+    const dist = Math.sqrt(
+      (pa.x - pb.x) ** 2 + (pa.y - pb.y) ** 2 + (pa.z - pb.z) ** 2
+    );
+
+    if (dist > TOLERANCE) return null; // Too far apart
+
+    // Return midpoint of the two closest points
+    return {
+      x: (pa.x + pb.x) / 2,
+      y: (pa.y + pb.y) / 2,
+      z: (pa.z + pb.z) / 2,
+    };
   }
 
   /** Make an object and all its current children invisible to the raycaster. */

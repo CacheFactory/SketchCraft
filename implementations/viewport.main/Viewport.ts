@@ -129,13 +129,21 @@ export class Viewport implements IViewport {
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 
     const raycaster = new THREE.Raycaster();
-    // Set tight thresholds so edges don't have a huge hit zone
-    raycaster.params.Line = { threshold: 0.05 };
-    raycaster.params.Points = { threshold: 0.05 };
+    // Scale edge hit threshold with camera distance so edges are equally easy
+    // to select at any zoom level (~15 screen pixels worth of tolerance)
+    const camDist = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+    const threshold = Math.max(0.1, camDist * 0.02); // ~2% of camera distance
+    raycaster.params.Line = { threshold };
+    raycaster.params.Points = { threshold };
     raycaster.setFromCamera(ndc, camera);
 
+    // Raycast main scene (faces) AND overlay scene (edges)
     const scene = this._webglRenderer.getScene();
-    const intersects = raycaster.intersectObjects(scene.children, true);
+    const overlayScene = this._webglRenderer.getOverlayScene();
+    const intersects = [
+      ...raycaster.intersectObjects(scene.children, true),
+      ...raycaster.intersectObjects(overlayScene.children, true),
+    ];
 
     const faceHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     const edgeHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
@@ -166,9 +174,13 @@ export class Viewport implements IViewport {
       }
     }
 
-    // Return faces first, then edges. This means hovering over a face
-    // always selects the face, not the edge on top of it.
-    return [...faceHits, ...edgeHits];
+    // If an edge was hit, it means the cursor is very close to it
+    // (within the Line threshold). Prioritize the edge over the face
+    // so edges are actually selectable. If no edge hit, faces come first.
+    if (edgeHits.length > 0) {
+      return [...edgeHits, ...faceHits];
+    }
+    return faceHits;
   }
 
   getWidth(): number { return this._width; }

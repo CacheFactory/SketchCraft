@@ -267,9 +267,10 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Primary selection tool. Single click selects entities (faces, edges, groups, components). Click+drag creates
-        a selection box (left-to-right = window select, right-to-left = crossing select). Double-click enters group/component
-        editing context. Triple-click selects all connected geometry. Shift+click toggles selection. Ctrl+click adds to selection.
+      description: "Point-pick on mouseDown with instant feedback. Shift+click toggles multi-select.\n          Drag-box selection\
+        \ with visual overlay (blue solid=window, green dashed=crossing).\n          Cursor changes to pointer over selectable\
+        \ entities. Pre-selection highlight on hover\n          (orange for faces, orange glow tube for edges). Also hosts\
+        \ BaseTool and ToolManager.\n          Resolves component IDs for component selection."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, ToolEvent, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { SelectionManager, SelectionSet, SelectionMode } from '../data/selection';\nimport { SceneManager, Entity,\
         \ EntityType } from '../data/scene';\nimport { RaycastResult } from '../rendering/raycast';\nimport { InferenceResult\
@@ -311,9 +312,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: 'Draw edges (lines) by clicking start and end points. Supports inference engine: snaps to axes (red/green/blue),
-        endpoints, midpoints, on-edge, on-face, perpendicular, parallel. Type a length in the VCB to set exact distance. Automatically
-        creates faces when edges form a closed coplanar loop. Press Esc to finish.'
+      description: "Multi-point line drawing with axis locking (Up=Y, Right=X, Left=Z, Down=unlock).\n          Uses ray-to-axis\
+        \ projection for accurate 3D positioning from any camera angle.\n          VCB input respects locked axis direction\
+        \ and cursor sign. Auto-face via createEdgeWithAutoFace.\n          splitFaceWithPath on deactivate. findOrCreateVertex\
+        \ from BaseTool for vertex reuse.\n          Commits on deactivate (not abort). Midpoint snap works via getStandardDrawPoint."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { Vector3 } from '../math/types';\nimport { InferenceResult, InferenceEngine } from '../geometry/inference';\n\
         import { Edge, Face, Vertex } from '../geometry/mesh';\nimport { SceneManager } from '../data/scene';\nimport { HistoryManager,\
@@ -354,9 +356,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Draw rectangles by clicking two opposite corners. Snaps to golden ratio and square proportions. Type 'width,height'
-        in VCB for exact dimensions. Inference engine snaps to axes, existing geometry. Creates a face with 4 edges. Arrow
-        keys lock to axes (Right=Red, Left=Green, Up=Blue).
+      description: "Two-click rectangle with arrow key plane switching (Right=YZ, Left=XY,\n          Up=XZ, Down=reset).\
+        \ Uses raycastDrawingPlane for mouse position on active plane.\n          VCB direction-aware: cursor quadrant determines\
+        \ sign of width/height.\n          Degenerate check prevents faces with < 0.001 width or height.\n          Preview\
+        \ shows dashed polygon outline that updates on plane change."
   uuid: QWmYWzAR
 - id: tool.circle
   kind: tool
@@ -429,9 +432,9 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: SketchUp's signature tool. Click a face and drag to extrude it into a 3D solid. Push into a solid to cut
-        away material. Double-click to repeat the last push/pull distance. Type exact distance in VCB. Works on any planar
-        face.
+      description: "Face extrusion with screen-space Y for distance. Pre-selected face auto-starts.\n          Preview shows\
+        \ dashed top face outline + vertical guide lines. VCB for exact distance.\n          Creates side faces + top cap.\
+        \ resolveSelectedEntityIds for component support."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { Face, Mesh, Edge, Vertex } from '../geometry/mesh';\nimport { Vector3 } from '../math/types';\nimport { InferenceResult\
         \ } from '../geometry/inference';\nimport { ExtrudeOperation, ExtrudeParams, ExtrudeResult } from '../operations/extrude';\n\
@@ -474,9 +477,8 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Move selected entities by clicking a base point and destination. Inference engine snaps to axes and existing
-        geometry. Type exact distance or coordinates in VCB. Ctrl+Move creates a copy. Type 'x3' after copy to create linear
-        array.
+      description: "Live vertex movement with preview. Gathers vertices from all selected faces/edges\n          (resolves\
+        \ component IDs). Saves/restores original positions for cancel. VCB distance\n          follows cursor direction."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { Entity } from '../data/scene';\nimport { Vector3 } from '../math/types';\nimport { InferenceResult } from\
         \ '../geometry/inference';\nimport { SelectionManager } from '../data/selection';\nimport { HistoryManager, Transaction\
@@ -514,9 +516,8 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Rotate selected entities around an axis. Click to set center, click to set rotation start angle, click
-        or type to set end angle. Protractor shows current angle with inference. Ctrl+Rotate creates a rotated copy. Arrow
-        keys lock rotation axis. Type exact angle in VCB.
+      description: "Three-click rotation (center, start angle, drag). Live preview via Rodrigues\n          rotation. VCB\
+        \ for exact degrees. Rotates around Y axis."
   uuid: WZyKJ6DX
 - id: tool.scale
   kind: tool
@@ -533,9 +534,7 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Scale selected entities using grip handles. Shows bounding box with corner, edge, and face grips. Corner
-        grips scale uniformly, edge grips scale along one axis, face grips scale along two axes. Ctrl toggles about center.
-        Type scale factor or 'width,height,depth' in VCB.
+      description: "Click origin, drag to scale. Live preview. VCB for exact factor.\n          Scales from origin point uniformly."
   uuid: PIor44v3
 - id: tool.offset
   kind: tool
@@ -552,9 +551,8 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Create offset copies of edges or faces. Select a face and drag to create an inset/outset copy of its boundary
-        edges. Type exact offset distance in VCB. Double-click to repeat last offset distance. Useful for creating wall thicknesses,
-        window frames, and decorative details.
+      description: "Click face, drag to inset/outset. Preview shows dashed offset polygon.\n          Creates inner face +\
+        \ connecting ring. Replaces original face."
   uuid: 3ZdOJaJh
 - id: tool.eraser
   kind: tool
@@ -571,8 +569,8 @@ nodes:
       complexity: simple
       status: implemented
     docs:
-      description: Delete edges by clicking or dragging across them. Shift+click hides edges instead. Ctrl+click softens/smooths
-        edges. Deleting an edge that bounds a face also deletes the face. Deleting all edges of a face deletes the face.
+      description: "Click/drag to delete faces and edges. Pre-selection highlight shows what will\n          be deleted. Each\
+        \ click wraps in transaction for undo support."
   uuid: 96zZ0Ia9
 - id: tool.paint
   kind: tool
@@ -866,13 +864,10 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: 'Primary 3D viewport occupying the center of the main window. Creates a canvas via Three.js setSize() (no
-        CSS override). ResizeObserver syncs canvas to container. raycastScene() forces camera.updateMatrixWorld(true) + projectionMatrixInverse.invert()
-        before every cast to prevent stale matrix bugs. Raycaster uses Line threshold 0.05 and returns faces before edges.
-        screenToWorld() intersects ground plane (Y=0). Middle mouse orbit/pan handled directly in ViewportCanvas with window-level
-        mouseup listener to prevent stuck state. Supports render modes: Wireframe, Hidden Line, Shaded, Textured, X-Ray. Handles
-        mouse picking via raycasting for tool interaction. Displays selection highlights, guide lines, and dimension annotations
-        as overlays.'
+      description: "Canvas via Three.js setSize. ResizeObserver syncs dimensions.\n          projectionMatrixInverse manually\
+        \ recomputed before every raycast. Raycasts both main\n          and overlay scenes. Edge threshold scales with camera\
+        \ distance. Edges returned before\n          faces for reliable edge selection. Middle mouse orbit/pan with window-level\
+        \ mouseup\n          listener and e.buttons===0 safety check."
   uuid: f8kRBGQr
 - id: renderer.webgl
   kind: renderer
@@ -895,12 +890,12 @@ nodes:
       complexity: very-complex
       status: implemented
     docs:
-      description: Core WebGL renderer built on Three.js. Manages the render loop, lighting (ambient + directional sun + hemisphere),
-        grid/axes overlays, and render mode switching (wireframe/shaded/textured/xray). Selection highlighting swaps face
-        mesh materials only (never edges) with polygonOffset for z-order. Pre-selection (hover) uses orange MeshBasicMaterial,
-        selection uses blue. Edge materials are never touched to prevent disappearing lines. Entity objects registered via
-        registerEntityObject() for raycasting. The raycaster in Viewport.raycastScene() prioritizes face hits over edge hits
-        and uses tight Line thresholds (0.05).
+      description: "Three.js WebGL renderer with ambient+directional+hemisphere lighting.\n          Infinite shader-based\
+        \ ground grid. Selection highlight swaps face materials (polygonOffset -1)\n          and edge materials (glow tube\
+        \ cylinder for visible thickness). Pre-selection uses orange,\n          selection uses blue. Edge lines in overlay\
+        \ scene (separate render pass after depth clear).\n          Raycasts both main scene (faces) and overlay scene (edges).\
+        \ Edge hit threshold scales\n          with camera distance (2% of distance). Edges prioritized over faces in raycast\
+        \ results."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -1404,8 +1399,9 @@ nodes:
       complexity: very-complex
       status: implemented
     docs:
-      description: Core geometry engine implementing a B-Rep (Boundary Representation) data structure similar to SketchUp's
-        internal model.
+      description: "B-Rep geometry kernel with half-edge mesh. Auto-face finds ALL coplanar\n          loops (not just shortest).\
+        \ Coplanarity tolerance 0.05. splitFaceWithPath handles edge-point\n          insertion. Guards: no self-edges, no\
+        \ zero-length edges, degenerate face prevention.\n          Serialization for undo/redo snapshots."
       notes: "## Typed Interface\n\n```typescript\nimport { Vector3, Matrix4, Plane, BoundingBox } from '../math/types';\n\
         \n// ========== Core Geometry Types ==========\n\nexport interface GeometryId {\n  readonly id: string; // unique\
         \ stable ID (UUID)\n}\n\nexport interface Vertex extends GeometryId {\n  position: Vector3; // float64\n  edges: HalfEdge[];\
@@ -3017,12 +3013,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Synchronizes the geometry engine's B-Rep data (vertices, edges, faces) with Three.js scene objects for
-        rendering. Each face becomes a THREE.Group with front (DoubleSide MeshStandardMaterial) + back meshes in the main
-        scene. Each edge becomes a THREE.Line in the OVERLAY scene (rendered in a separate pass after depth clear, so edges
-        always draw on top of faces regardless of highlight state). Edge materials are shared and never swapped by the highlight
-        system. Preview lines and snap markers are non-raycastable (raycast=()=>{}). Hosts vertex/midpoint snap detection
-        by projecting all vertices to screen space on each mouse move (draw tools only).
+      description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n          (DoubleSide front + back\
+        \ meshes) in main scene. Edges as THREE.Line with shared material\n          in overlay scene. Component bounding\
+        \ boxes as purple wireframe. Snap system: vertices,\n          midpoints, and edge-edge intersections projected to\
+        \ screen space. Preview lines and snap\n          markers non-raycastable (raycast=()=>{})."
   uuid: sBr1dg3X
 - id: app.singleton
   kind: service
@@ -3051,11 +3045,11 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Vertex/midpoint snap detection integrated into SceneBridge. On every mouse move during drawing tools, projects
-        all existing vertices to screen space and finds the nearest one within 15px. Returns the snapped 3D world point so
-        drawing tools can connect to existing geometry. Renders a green ring+dot marker at snap points (non-raycastable overlay).
-        Falls back to showing a blue cursor dot when not snapped. Only active for draw-category tools; disabled for select
-        and navigate tools.
+      description: "Vertex, midpoint, and edge-edge intersection snap detection in SceneBridge.\n          Projects all vertices\
+        \ and edge midpoints to screen space on each mouse move (draw tools only).\n          Also detects edge-edge intersection\
+        \ points using closest-point-between-segments math (0.05\n          tolerance). Green ring+dot marker for snapped,\
+        \ blue dot for cursor position. Returns the\n          exact snapped world position which tools use for precise vertex\
+        \ placement."
   uuid: sSnpSys1
 - id: system.autoface
   kind: service
@@ -3067,15 +3061,14 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: 'Three auto-face mechanisms in GeometryEngine: (1) autoCreateFaces via createEdgeWithAutoFace(): BFS finds
-        shortest closed coplanar loop (3-12 vertices) through existing edges when a new edge is created. Returns full loop
-        including target vertex. Used by Line tool. (2) splitFaceWithEdge via createEdgeWithAutoFace(): when BOTH endpoints
-        are on the same face boundary (non-adjacent), splits the face into two along the new edge. Runs before autoCreateFaces.
-        (3) splitFaceWithPath(): splits a face along a multi-vertex path (e.g., arc). Handles endpoints that lie ON face edges
-        (not just at corners) by detecting proximity to edge line segments (0.05 tolerance), inserting the vertex into the
-        face boundary, and splitting the underlying edge. Both resulting faces include the arc vertices along their shared
-        boundary (no chord edge created). Used by Arc tool and Line tool on deactivate. Rectangle/Circle/Polygon use plain
-        createEdge(). File I/O uses OBJ format for save/open.'
+      description: "Three auto-face mechanisms in GeometryEngine:\n          (1) autoCreateFaces via createEdgeWithAutoFace():\
+        \ BFS finds ALL closed coplanar loops (not just\n          shortest) through existing edges. Coplanarity tolerance\
+        \ is 0.05 (practical for hand-drawn geometry).\n          (2) splitFaceWithEdge: splits face when edge connects two\
+        \ non-adjacent boundary vertices.\n          (3) splitFaceWithPath(): splits face along multi-vertex path (arc). Handles\
+        \ endpoints ON face\n          edges via proximity detection (0.05 threshold), vertex insertion, and edge splitting.\
+        \ Both\n          resulting faces include arc vertices on shared boundary (no chord edge).\n          Guards: no self-edges,\
+        \ no zero-length edges, no degenerate faces (< 3 unique vertices).\n          Arc tool uses plain createEdge + splitFaceWithPath.\
+        \ Line tool uses createEdgeWithAutoFace."
   uuid: sAutFce1
 - id: system.undo
   kind: service
@@ -3103,12 +3096,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: 'ALL keyboard events are handled by a single window-level listener in App.tsx. No onKeyDown on the viewport
-        container (removed to prevent double-firing). The handler routes: (1) Cmd/Ctrl+Z → undo, Cmd/Ctrl+Shift+Z → redo,
-        (2) single-letter keys → tool activation via activateTool(), (3) arrow keys → forwarded to active tool''s onKeyDown
-        for plane switching, (4) Escape/Enter/Delete → forwarded to active tool. Arrow keys bypass the INPUT focus check so
-        they work even when the VCB has focus. Electron menu items have NO accelerators — all shortcuts go through this handler
-        to avoid the native menu intercepting key events before they reach the renderer.'
+      description: "Single window-level keyboard handler in App.tsx. Routes: Cmd+Z→undo,\n          Cmd+Shift+Z→redo, Cmd+S/O/N→file\
+        \ ops, letters→tool activation, arrows→tool onKeyDown\n          (axis lock for Line, plane switch for shapes), Escape/Enter/Delete→tool\
+        \ action. Arrow keys\n          bypass INPUT focus check. Digits auto-focus the VCB input with preventDefault to avoid\n\
+        \          double-insertion. Electron menu has NO accelerators."
   uuid: sKbdRout
 - id: system.components
   kind: service
@@ -3155,10 +3146,9 @@ nodes:
       complexity: simple
       status: implemented
     docs:
-      description: Save/Open via OBJ text format in Application. exportOBJ() writes vertices (v), faces (f), and edges (l)
-        to text ArrayBuffer. importOBJ() parses OBJ text, creates vertices, edges, and faces. Triggered by toolbar buttons
-        (📄📂💾) and keyboard shortcuts (Cmd+N/O/S/Shift+S). Uses Electron IPC file:import/file:export/file:write for native
-        file dialogs.
+      description: "OBJ text format save/open in Application. exportOBJ() writes vertices (v),\n          faces (f), and edges\
+        \ (l). importOBJ() parses and creates geometry. Toolbar buttons\n          (\U0001F4C4\U0001F4C2\U0001F4BE) and shortcuts\
+        \ (Cmd+N/O/S/Shift+S). Uses Electron IPC for native file dialogs."
   uuid: sFileIO1
 - id: system.dragselect
   kind: service

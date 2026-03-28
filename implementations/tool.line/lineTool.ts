@@ -59,10 +59,20 @@ export class LineTool extends BaseTool {
       this.setStatus('Click next point. Arrow keys: Up=Y, Right=X, Left=Z, Down=free.');
     } else if (this.phase === 'drawing') {
       const vertex = this.findOrCreateVertex(point);
+      const prevId = this.vertexIds[this.vertexIds.length - 1];
+
+      // Guard: don't create zero-length edge (clicked same point twice)
+      if (vertex.id === prevId) return;
+
       this.vertexIds.push(vertex.id);
 
-      const prevId = this.vertexIds[this.vertexIds.length - 2];
-      this.document.geometry.createEdgeWithAutoFace(prevId, vertex.id);
+      try {
+        this.document.geometry.createEdgeWithAutoFace(prevId, vertex.id);
+      } catch {
+        // Edge creation failed (degenerate) — remove the vertex and skip
+        this.vertexIds.pop();
+        return;
+      }
 
       this.points.push(point);
       this.axisLock = null; // Reset lock after placing point
@@ -178,9 +188,30 @@ export class LineTool extends BaseTool {
     } else {
       const dist = this.parseDistance(value);
       if (isNaN(dist)) return;
-      if (!this.currentPoint) return;
-      const dir = vec3.normalize(vec3.sub(this.currentPoint, lastPoint));
-      if (vec3.lengthSq(dir) < 1e-10) return;
+
+      let dir: Vec3;
+
+      if (this.axisLock) {
+        // Use the locked axis direction
+        switch (this.axisLock) {
+          case 'x': dir = { x: 1, y: 0, z: 0 }; break;
+          case 'y': dir = { x: 0, y: 1, z: 0 }; break;
+          case 'z': dir = { x: 0, y: 0, z: 1 }; break;
+        }
+        // Use the sign from currentPoint to determine positive/negative direction
+        if (this.currentPoint) {
+          const delta = vec3.sub(this.currentPoint, lastPoint);
+          const component = this.axisLock === 'x' ? delta.x : this.axisLock === 'y' ? delta.y : delta.z;
+          if (component < 0) dir = vec3.negate(dir);
+        }
+      } else if (this.currentPoint) {
+        // Use the preview line direction (cursor direction)
+        dir = vec3.normalize(vec3.sub(this.currentPoint, lastPoint));
+        if (vec3.lengthSq(dir) < 1e-10) return;
+      } else {
+        return; // No direction available
+      }
+
       targetPoint = vec3.add(lastPoint, vec3.mul(dir, dist));
     }
 
@@ -273,17 +304,6 @@ export class LineTool extends BaseTool {
     if (planePoint) return planePoint;
 
     return null;
-  }
-
-  private findOrCreateVertex(point: Vec3): { id: string } {
-    const SNAP_DIST = 0.01;
-    const mesh = this.document.geometry.getMesh();
-    for (const [, v] of mesh.vertices) {
-      if (vec3.distance(v.position, point) < SNAP_DIST) {
-        return { id: v.id };
-      }
-    }
-    return this.document.geometry.createVertex(point);
   }
 
   private reset(): void {

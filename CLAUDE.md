@@ -64,22 +64,28 @@ ALL keyboard events go through a SINGLE `window` listener in `App.tsx`. No `onKe
 Mouse event on container div → `ViewportCanvas.getToolEvent()` (raycast + snap) → `tool.onMouseMove/Down/Up(event)` → geometry changes → `app.syncScene()` + `app.syncSelection()`. See edges from `process.renderer` to `app.singleton`.
 
 ### Selection & Highlighting
-Raycast in `Viewport.raycastScene()` returns `hitEntityId` in the event. Faces prioritized over edges (tight Line threshold 0.05). Highlight only swaps face mesh materials (never edge materials — edges are in overlay scene). See node `renderer.webgl`.
+Raycast tests both main scene (faces) and overlay scene (edges). Edge hit threshold scales with camera distance (2% of dist). **Edges prioritized over faces** in results when hit — makes edge selection reliable. Highlight: face materials swapped (polygonOffset -1), edge materials swapped + glow tube cylinder for visible thickness. Pre-selection = orange, selection = blue. See node `renderer.webgl`.
 
 ### Edge Rendering
-Edge lines are in the **overlay scene**, rendered in a separate pass AFTER the main scene with depth cleared. This guarantees edges always draw on top of faces regardless of face highlight state. Edge materials are shared and never swapped. See node `bridge.scene`.
+Edge lines are in the **overlay scene**, rendered in a separate pass AFTER the main scene with depth cleared. Edge materials ARE swapped for highlighting now (with glow tube). Highlight restored on mouse-off. See node `bridge.scene`.
 
 ### Undo/Redo
 Snapshot-based: `geometry.serialize()` before each transaction, `geometry.deserialize()` on undo. Critical: `newDocument()` calls `history.clear()` not `new HistoryManager()` to preserve callbacks. Line tool commits on deactivate (not abort). See node `system.undo`.
 
 ### Snapping
-`SceneBridge.findSnapPoint()` projects all vertices to screen space, finds nearest within 15px. Only active for `draw` category tools. Green ring = snapped to vertex. See node `system.snap`.
+`SceneBridge.findSnapPoint()` detects three snap types: (1) vertex endpoints, (2) edge midpoints, (3) edge-edge intersection points (closest-point-between-segments, 0.05 tolerance). Projects to screen space, finds nearest within 15px. Green ring = snapped. Only for `draw` tools. See node `system.snap`.
 
 ### Auto-Face Creation
 Three mechanisms in GeometryEngine: (1) `autoCreateFaces` via `createEdgeWithAutoFace()` — BFS finds closed coplanar loops. (2) `splitFaceWithEdge` — splits a face when edge connects two non-adjacent boundary vertices. (3) `splitFaceWithPath()` — splits a face along a multi-vertex path (arc), handles endpoints ON face edges (not just corners) by proximity detection and vertex insertion. Both split faces include arc vertices on their shared boundary (no chord edge). Arc tool uses plain `createEdge` + `splitFaceWithPath`. Line tool uses `createEdgeWithAutoFace` + `splitFaceWithPath` on deactivate. Rectangle/Circle use plain `createEdge`. See node `system.autoface`.
 
-### Drawing Plane Switching
-All draw tools (Line, Rectangle, Circle, Arc, Polygon) support arrow key plane switching. Right→Red/YZ, Left→Blue/XY, Up→Green/XZ, Down→reset. Tools use `screenToDrawingPlane()` to raycast onto the active plane (not the ground plane `worldPoint`). See `BaseTool.handleArrowKeyPlane()`.
+### Drawing Plane Switching & Axis Locking
+**Shape tools** (Rectangle, Circle, Arc, Polygon): arrow keys switch drawing plane (Right→YZ, Left→XY, Up→XZ, Down→reset). Use `screenToDrawingPlane()`. **Line tool**: arrow keys lock to axis (Up→Y vertical, Right→X, Left→Z, Down→unlock). Uses ray-to-axis projection. VCB input respects both modes.
+
+### Geometry Guards
+`createEdge` rejects self-edges and zero-length edges. `createFace` strips duplicate consecutive vertices, rejects < 3 unique vertices. `autoCreateFaces` coplanarity tolerance is 0.05 (practical for hand-drawn geometry). BFS finds ALL loops, not just shortest.
+
+### BaseTool Shared Methods
+`findOrCreateVertex()`, `getStandardDrawPoint()`, `screenToDrawingPlane()`, `handleArrowKeyPlane()`, `resolveSelectedEntityIds()`, `isEditable()` — shared by all tools. Prevents code duplication.
 
 ### Component System
 Groups of faces/edges that act as a single selectable/movable unit. Protected from main-scene editing. Created via "Make Component" button in Entity Info panel. "Edit Component" enters isolated editing mode (purple banner). "Explode" dissolves back to loose geometry. Purple wireframe bounding box rendered in overlay scene. See node `system.components`.

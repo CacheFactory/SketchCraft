@@ -188,9 +188,18 @@ export class RectangleTool extends BaseTool {
   private computeOppositeCorner(width: number, height: number): Vec3 {
     if (!this.firstCorner) return { x: 0, y: 0, z: 0 };
     const { axis1, axis2 } = this.getPlaneAxes();
+
+    // Use the cursor direction to determine sign of each dimension
+    let sign1 = 1, sign2 = 1;
+    if (this.currentCorner && this.firstCorner) {
+      const diag = vec3.sub(this.currentCorner, this.firstCorner);
+      if (vec3.dot(diag, axis1) < 0) sign1 = -1;
+      if (vec3.dot(diag, axis2) < 0) sign2 = -1;
+    }
+
     return vec3.add(
-      vec3.add(this.firstCorner, vec3.mul(axis1, width)),
-      vec3.mul(axis2, height),
+      vec3.add(this.firstCorner, vec3.mul(axis1, width * sign1)),
+      vec3.mul(axis2, height * sign2),
     );
   }
 

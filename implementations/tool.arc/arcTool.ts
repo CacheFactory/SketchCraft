@@ -163,14 +163,7 @@ export class ArcTool extends BaseTool {
     this.arcPoints.push(this.endPoint);
   }
 
-  private findOrCreateVertex(point: Vec3): { id: string } {
-    const SNAP_DIST = 0.01; // Generous threshold for snapped points
-    const mesh = this.document.geometry.getMesh();
-    for (const [, v] of mesh.vertices) {
-      if (vec3.distance(v.position, point) < SNAP_DIST) return { id: v.id };
-    }
-    return this.document.geometry.createVertex(point);
-  }
+  // findOrCreateVertex is now in BaseTool
 
   private createArc(): void {
     if (!this.startPoint || !this.endPoint) return;

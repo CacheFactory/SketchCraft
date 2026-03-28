@@ -36,10 +36,21 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   createEdge(v1Id: string, v2Id: string): IEdge {
+    // Guard: no self-edges
+    if (v1Id === v2Id) throw new Error('Cannot create edge between a vertex and itself');
+
     const v1 = this.mesh.vertices.get(v1Id);
     const v2 = this.mesh.vertices.get(v2Id);
     if (!v1) throw new Error(`Vertex ${v1Id} not found`);
     if (!v2) throw new Error(`Vertex ${v2Id} not found`);
+
+    // Guard: no zero-length edges
+    const dx = v1.position.x - v2.position.x;
+    const dy = v1.position.y - v2.position.y;
+    const dz = v1.position.z - v2.position.z;
+    if (dx * dx + dy * dy + dz * dz < 1e-10) {
+      throw new Error('Cannot create zero-length edge');
+    }
 
     // Check if edge already exists
     const existing = this.mesh.findEdgeBetween(v1Id, v2Id);
@@ -54,6 +65,21 @@ export class GeometryEngine implements IGeometryEngine {
    * that want SketchUp-style auto-face behavior.
    */
   createEdgeWithAutoFace(v1Id: string, v2Id: string): IEdge {
+    // Guard against self-edges or zero-length
+    if (v1Id === v2Id) {
+      // Return existing edge if any, otherwise throw
+      const existing = this.mesh.findEdgeBetween(v1Id, v2Id);
+      if (existing) return existing;
+      throw new Error('Cannot create self-edge');
+    }
+    const v1 = this.mesh.vertices.get(v1Id);
+    const v2 = this.mesh.vertices.get(v2Id);
+    if (v1 && v2 && vec3.distanceSq(v1.position, v2.position) < 1e-10) {
+      const existing = this.mesh.findEdgeBetween(v1Id, v2Id);
+      if (existing) return existing;
+      throw new Error('Cannot create zero-length edge');
+    }
+
     // Check for face bisection BEFORE creating the edge
     const bisectedFaceId = this.findBisectedFace(v1Id, v2Id);
 
@@ -141,17 +167,15 @@ export class GeometryEngine implements IGeometryEngine {
    * This is the core SketchUp behavior: closing a loop of edges creates a face.
    */
   private autoCreateFaces(v1Id: string, v2Id: string): void {
-    // Find all short cycles that include the new edge (v1→v2)
-    // Do a BFS from v2 trying to reach v1 through other edges
-    const maxDepth = 12; // Max vertices in a face
+    // Find ALL short coplanar loops that include the new edge.
+    // BFS from v2 to v1 through other edges, collecting all paths.
+    const maxDepth = 12;
 
-    const findLoop = (startId: string, targetId: string): string[] | null => {
-      // BFS to find shortest path from startId to targetId through edges
+    const findAllLoops = (startId: string, targetId: string): string[][] => {
+      const loops: string[][] = [];
       const queue: Array<{ vertexId: string; path: string[] }> = [
         { vertexId: startId, path: [startId] },
       ];
-      const visited = new Set<string>();
-      visited.add(startId);
 
       while (queue.length > 0) {
         const { vertexId, path } = queue.shift()!;
@@ -159,7 +183,6 @@ export class GeometryEngine implements IGeometryEngine {
 
         const edges = this.mesh.getVertexEdges(vertexId);
         for (const edge of edges) {
-          // Don't traverse the new edge we just created
           if ((edge.startVertexId === v1Id && edge.endVertexId === v2Id) ||
               (edge.startVertexId === v2Id && edge.endVertexId === v1Id)) {
             continue;
@@ -168,39 +191,39 @@ export class GeometryEngine implements IGeometryEngine {
           const neighborId = edge.startVertexId === vertexId ? edge.endVertexId : edge.startVertexId;
 
           if (neighborId === targetId && path.length >= 2) {
-            // Found a loop! Return all vertex IDs including the target
-            return [...path, targetId];
+            loops.push([...path, targetId]);
+            continue; // Don't stop — keep finding more loops
           }
 
-          if (!visited.has(neighborId)) {
-            visited.add(neighborId);
+          if (!path.includes(neighborId)) {
             queue.push({ vertexId: neighborId, path: [...path, neighborId] });
           }
         }
       }
-      return null;
+      return loops;
     };
 
-    const loop = findLoop(v2Id, v1Id);
-    if (!loop) return;
+    const loops = findAllLoops(v2Id, v1Id);
 
-    // Check if all vertices in the loop are coplanar
-    if (loop.length < 3) return;
-    if (!this.checkCoplanar(loop)) return;
+    for (const loop of loops) {
+      if (loop.length < 3) continue;
+      if (!this.checkCoplanar(loop)) continue;
 
-    // Check that no face already exists with these exact vertices (in any order)
-    for (const [, face] of this.mesh.faces) {
-      if (face.vertexIds.length === loop.length) {
-        const faceSet = new Set(face.vertexIds);
-        if (loop.every(v => faceSet.has(v))) return; // Face already exists
+      // Check that no face already exists with these exact vertices
+      let exists = false;
+      for (const [, face] of this.mesh.faces) {
+        if (face.vertexIds.length === loop.length) {
+          const faceSet = new Set(face.vertexIds);
+          if (loop.every(v => faceSet.has(v))) { exists = true; break; }
+        }
       }
-    }
+      if (exists) continue;
 
-    // Create the face
-    try {
-      this.createFace(loop);
-    } catch {
-      // Silently ignore face creation errors (e.g., degenerate geometry)
+      try {
+        this.createFace(loop);
+      } catch {
+        // Silently ignore
+      }
     }
   }
 
@@ -335,8 +358,22 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   createFace(vertexIds: string[]): IFace {
+    // Guard: remove duplicate consecutive vertices
+    const cleaned: string[] = [];
+    for (let i = 0; i < vertexIds.length; i++) {
+      const prev = i === 0 ? vertexIds[vertexIds.length - 1] : vertexIds[i - 1];
+      if (vertexIds[i] !== prev) cleaned.push(vertexIds[i]);
+    }
+    vertexIds = cleaned;
+
     if (vertexIds.length < 3) {
-      throw new Error('A face requires at least 3 vertices');
+      throw new Error('A face requires at least 3 unique vertices');
+    }
+
+    // Guard: no duplicate vertices in face
+    const uniqueSet = new Set(vertexIds);
+    if (uniqueSet.size < 3) {
+      throw new Error('A face requires at least 3 unique vertices');
     }
 
     // Validate all vertices exist
@@ -456,7 +493,7 @@ export class GeometryEngine implements IGeometryEngine {
     // Check remaining points
     for (let i = 3; i < positions.length; i++) {
       const dist = Math.abs(vec3.dot(normal, positions[i]) - d);
-      if (dist > EPSILON * 1000) return false; // Use relaxed tolerance for coplanarity
+      if (dist > 0.05) return false; // Practical tolerance for hand-drawn geometry
     }
 
     return true;

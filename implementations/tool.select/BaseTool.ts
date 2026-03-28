@@ -89,6 +89,37 @@ export abstract class BaseTool implements ITool {
     return event.worldPoint;
   }
 
+  /**
+   * Standard point resolution for draw tools:
+   * 1. If snapped (worldPoint matches a vertex), use it
+   * 2. If axis locked, project ray onto locked axis
+   * 3. Raycast onto drawing plane
+   * 4. Fall back to ground plane worldPoint
+   */
+  protected getStandardDrawPoint(event: ToolMouseEvent, anchor?: Vec3): Vec3 | null {
+    // Snapped worldPoint always wins
+    if (event.worldPoint) return event.worldPoint;
+    // Raycast onto drawing plane
+    const planePoint = this.screenToDrawingPlane(event, anchor);
+    if (planePoint) return planePoint;
+    return null;
+  }
+
+  /**
+   * Find an existing vertex at the given position, or create a new one.
+   * Prevents duplicate vertices at the same location.
+   */
+  protected findOrCreateVertex(point: Vec3): { id: string } {
+    const SNAP_DIST = 0.01;
+    const mesh = this.document.geometry.getMesh();
+    for (const [, v] of mesh.vertices) {
+      if (vec3.distance(v.position, point) < SNAP_DIST) {
+        return { id: v.id };
+      }
+    }
+    return this.document.geometry.createVertex(point);
+  }
+
   /** Parse VCB input as a single number. Returns NaN on failure. */
   protected parseDistance(value: string): number {
     return parseFloat(value.trim());

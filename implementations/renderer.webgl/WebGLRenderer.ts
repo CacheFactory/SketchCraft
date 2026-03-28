@@ -304,8 +304,8 @@ export class WebGLRenderer implements IRenderer {
   });
 
   private _selHighlightEdge = new THREE.LineBasicMaterial({
-    color: 0x0055ff,
-    linewidth: 3,
+    color: 0x00aaff,
+    linewidth: 5,
   });
 
   private _preSelHighlightFace = new THREE.MeshBasicMaterial({
@@ -320,8 +320,8 @@ export class WebGLRenderer implements IRenderer {
   });
 
   private _preSelHighlightEdge = new THREE.LineBasicMaterial({
-    color: 0xff6600,
-    linewidth: 3,
+    color: 0xff8800,
+    linewidth: 5,
   });
 
   // Store original materials for restoration
@@ -331,8 +331,6 @@ export class WebGLRenderer implements IRenderer {
     const id = obj.userData.entityId;
     if (!id) return;
 
-    // Only highlight meshes (faces), not lines (edges).
-    // Edge lines stay with their original material to avoid disappearing.
     if (obj instanceof THREE.Mesh) {
       if (!this._highlightedObjects.has(id)) {
         this._highlightedObjects.set(id, { obj, origMaterial: obj.material });
@@ -350,8 +348,36 @@ export class WebGLRenderer implements IRenderer {
           }
         });
       }
+    } else if (obj instanceof THREE.Line) {
+      // Highlight edges by swapping material + adding a glow tube
+      if (!this._highlightedObjects.has(id)) {
+        this._highlightedObjects.set(id, { obj, origMaterial: obj.material as THREE.Material });
+      }
+      obj.material = mode === 'selection' ? this._selHighlightEdge : this._preSelHighlightEdge;
+
+      // Add a tube mesh along the edge for visible thickness
+      const positions = (obj.geometry as THREE.BufferGeometry).getAttribute('position');
+      if (positions && positions.count >= 2) {
+        const p1 = new THREE.Vector3(positions.getX(0), positions.getY(0), positions.getZ(0));
+        const p2 = new THREE.Vector3(positions.getX(1), positions.getY(1), positions.getZ(1));
+        const dir = new THREE.Vector3().subVectors(p2, p1);
+        const len = dir.length();
+        if (len > 0.001) {
+          const tubeRadius = 0.03;
+          const tubeGeo = new THREE.CylinderGeometry(tubeRadius, tubeRadius, len, 6, 1);
+          tubeGeo.rotateX(Math.PI / 2);
+          const color = mode === 'selection' ? 0x00aaff : 0xff8800;
+          const tubeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false });
+          const tube = new THREE.Mesh(tubeGeo, tubeMat);
+          tube.name = `edge-glow-${id}`;
+          tube.position.copy(p1).lerp(p2, 0.5);
+          tube.lookAt(p2);
+          tube.raycast = () => {}; // Non-raycastable
+          (obj as any).__glowTube = tube;
+          this._overlayScene.add(tube);
+        }
+      }
     }
-    // Edges: no material swap. They stay visible as-is.
   }
 
   private _restoreObject(obj: THREE.Object3D): void {
@@ -359,8 +385,16 @@ export class WebGLRenderer implements IRenderer {
     if (!id) return;
 
     const saved = this._highlightedObjects.get(id);
-    if (saved && saved.obj instanceof THREE.Mesh) {
-      saved.obj.material = saved.origMaterial;
+    if (saved && (saved.obj instanceof THREE.Mesh || saved.obj instanceof THREE.Line)) {
+      (saved.obj as any).material = saved.origMaterial;
+      // Remove glow tube if present
+      if ((saved.obj as any).__glowTube) {
+        const tube = (saved.obj as any).__glowTube;
+        this._overlayScene.remove(tube);
+        tube.geometry.dispose();
+        (tube.material as THREE.Material).dispose();
+        delete (saved.obj as any).__glowTube;
+      }
       this._highlightedObjects.delete(id);
     }
 
@@ -368,8 +402,8 @@ export class WebGLRenderer implements IRenderer {
     if (obj.parent && obj.parent !== this._scene) {
       obj.parent.traverse(child => {
         const childSaved = this._highlightedObjects.get(child.uuid);
-        if (childSaved && childSaved.obj instanceof THREE.Mesh) {
-          childSaved.obj.material = childSaved.origMaterial;
+        if (childSaved && (childSaved.obj instanceof THREE.Mesh || childSaved.obj instanceof THREE.Line)) {
+          (childSaved.obj as any).material = childSaved.origMaterial;
           this._highlightedObjects.delete(child.uuid);
         }
       });
@@ -378,8 +412,16 @@ export class WebGLRenderer implements IRenderer {
 
   private _restoreHighlighted(): void {
     for (const [, { obj, origMaterial }] of this._highlightedObjects) {
-      if (obj instanceof THREE.Mesh) {
-        obj.material = origMaterial;
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+        (obj as any).material = origMaterial;
+      }
+      // Remove glow tubes
+      if ((obj as any).__glowTube) {
+        const tube = (obj as any).__glowTube;
+        this._overlayScene.remove(tube);
+        tube.geometry.dispose();
+        (tube.material as THREE.Material).dispose();
+        delete (obj as any).__glowTube;
       }
     }
     this._highlightedObjects.clear();

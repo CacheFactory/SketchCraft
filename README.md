@@ -4,6 +4,8 @@ A free, open-source 3D modeling application inspired by SketchUp, built with Ele
 
 ![Electron](https://img.shields.io/badge/Electron-28-blue) ![Three.js](https://img.shields.io/badge/Three.js-0.162-green) ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue) ![React](https://img.shields.io/badge/React-18-blue)
 
+<video src="https://github.com/CacheFactory/SketchCraft/raw/main/docs/sketchcraft-demo.mp4" controls width="100%"></video>
+
 ## Features
 
 - **Push/Pull modeling** — draw a 2D face, extrude it into a 3D solid
