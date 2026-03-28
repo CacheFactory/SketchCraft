@@ -4,7 +4,11 @@ A free, open-source 3D modeling application inspired by SketchUp, built with Ele
 
 ![Electron](https://img.shields.io/badge/Electron-28-blue) ![Three.js](https://img.shields.io/badge/Three.js-0.162-green) ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue) ![React](https://img.shields.io/badge/React-18-blue)
 
-<video src="https://github.com/CacheFactory/SketchCraft/raw/main/docs/sketchcraft-demo.mp4" controls width="100%"></video>
+
+
+https://github.com/user-attachments/assets/daa8530d-d3b9-4830-90af-bb2e815e5ce2
+
+
 
 ## Features
 
