@@ -660,11 +660,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Measure distances and create construction guides. Click two points to measure distance (shown in VCB).
-        Click an edge to create a parallel construction line at typed offset distance. Click a point to create a construction
-        point. Construction geometry is infinite and used for alignment/snapping.
+      description: "Click two points to measure distance. Live preview line during placement.\n          Creates dashed construction\
+        \ guide line between measured points. VCB input for exact distance\n          in current cursor direction. Uses getStandardDrawPoint\
+        \ and findOrCreateVertex from BaseTool.\n          Supports arrow key plane switching."
   uuid: 9yqt3Wjr
 - id: tool.protractor
   kind: tool
@@ -679,10 +679,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Measure angles and create angular construction lines. Click to set vertex, click to set base direction,
-        click or type to measure angle. Creates a construction line at the measured angle. Useful for setting up angled geometry.
+      description: "Three-click angle measurement (center, baseline, angle point) with live preview\n          showing both\
+        \ baseline and angle lines. Places dashed construction guide line at measured angle.\n          VCB input for exact\
+        \ degrees. Guide extends 50 units from center."
   uuid: p5t0Ix1W
 - id: tool.follow_me
   kind: tool
@@ -697,11 +698,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: complex
-      status: placeholder
+      status: implemented
     docs:
-      description: Extrude a face along a path (sweep operation). Pre-select a path of connected edges, then click a face
-        profile to sweep it along the path. Or click a face and drag along edges. Creates complex 3D shapes like cornices,
-        pipes, lathe-turned objects. The profile face is swept perpendicular to the path at each segment.
+      description: "Select face as profile, click edge to sweep along connected edges. Collects\n          path by walking\
+        \ connected edges avoiding profile boundary. Calls SweepOperation which\n          generates cross-section rings at\
+        \ each path vertex and connects them with quad faces.\n          Supports pre-selected face from selection."
     references: https://help.sketchup.com/en/sketchup/using-follow-me
   uuid: udD539qm
 - id: tool.dimension
@@ -736,11 +737,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: simple
-      status: placeholder
+      status: implemented
     docs:
-      description: 'Add text labels and 3D text to the model. Leader text: click a point, drag to place leader endpoint, type
-        label text. Screen text: click to place floating text. 3D text: type text, choose font/height/extrusion, place as
-        solid geometry.'
+      description: "Click to place, type text in VCB, press Enter. Creates Three.js Sprite with\n          CanvasTexture (white\
+        \ rounded-rect background, bold text). Billboard behavior (always faces\n          camera). Positioned in overlay\
+        \ scene. Non-raycastable."
   uuid: LUHz0ZsR
 - id: gesture.click
   kind: gesture
@@ -2007,8 +2008,8 @@ nodes:
       language: TypeScript (stub — WASM not installed)
       api: N-API
       reason: Manifold geometry kernel provides robust, fast CSG boolean operations. Compiled to WebAssembly for cross-platform
-        compatibility without native compilation. The upstream C++ library (compiled to WASM) would be 10-100x faster than pure JavaScript for boolean operations
-        on complex meshes.
+        compatibility without native compilation. The upstream C++ library (compiled to WASM) would be 10-100x faster than
+        pure JavaScript for boolean operations on complex meshes.
     perf:
       critical: true
       optimizations: WASM SIMD instructions, pre-allocated memory pools, batch operation API

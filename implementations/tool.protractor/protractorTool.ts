@@ -1,9 +1,10 @@
 // @archigraph tool.protractor
-// Protractor tool: click center, click baseline, move to measure angle
+// Protractor tool: measure angles and place construction guide lines.
+// Click center → click baseline → move to measure → click to place guide.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
-import { vec3, radToDeg } from '../../src/core/math';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import { vec3, radToDeg, degToRad } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
 export class ProtractorTool extends BaseTool {
@@ -16,6 +17,7 @@ export class ProtractorTool extends BaseTool {
 
   private center: Vec3 | null = null;
   private baselinePoint: Vec3 | null = null;
+  private currentPoint: Vec3 | null = null;
   private currentAngle = 0;
   private step: 0 | 1 | 2 = 0;
 
@@ -32,7 +34,7 @@ export class ProtractorTool extends BaseTool {
 
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
-    const point = this.resolvePoint(event);
+    const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
 
     if (this.step === 0) {
@@ -43,35 +45,25 @@ export class ProtractorTool extends BaseTool {
     } else if (this.step === 1) {
       this.baselinePoint = point;
       this.step = 2;
-      this.setStatus('Move to measure angle, then click to place guide.');
+      this.setStatus('Move to measure angle. Click to place guide. Type degrees for exact.');
     } else if (this.step === 2) {
-      // Place construction guide line at measured angle
-      if (this.center) {
-        const dir = vec3.normalize(vec3.sub(point, this.center));
-        const guideEnd = vec3.add(this.center, vec3.mul(dir, 1000));
-        this.viewport.renderer.addGuideLine(
-          `protractor-guide-${Date.now()}`,
-          this.center,
-          guideEnd,
-          { r: 0, g: 0, b: 0, a: 0.5 },
-          true,
-        );
-      }
-
-      this.setStatus(`Angle: ${this.currentAngle.toFixed(1)} degrees`);
-      this.reset();
+      this.placeGuide();
     }
   }
 
   onMouseMove(event: ToolMouseEvent): void {
-    if (this.step !== 2 || !this.center || !this.baselinePoint) return;
-    const point = this.resolvePoint(event);
+    const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
+    this.currentPoint = point;
 
-    const baseDir = vec3.normalize(vec3.sub(this.baselinePoint, this.center));
-    const curDir = vec3.normalize(vec3.sub(point, this.center));
-    this.currentAngle = radToDeg(vec3.angle(baseDir, curDir));
-    this.setVCBValue(this.currentAngle.toFixed(1));
+    if (this.step === 2 && this.center && this.baselinePoint) {
+      const baseDir = vec3.normalize(vec3.sub(this.baselinePoint, this.center));
+      const curDir = vec3.normalize(vec3.sub(point, this.center));
+      if (vec3.lengthSq(baseDir) > 0.001 && vec3.lengthSq(curDir) > 0.001) {
+        this.currentAngle = radToDeg(vec3.angle(baseDir, curDir));
+        this.setVCBValue(`${this.currentAngle.toFixed(1)}°`);
+      }
+    }
   }
 
   onKeyDown(event: ToolKeyEvent): void {
@@ -82,18 +74,83 @@ export class ProtractorTool extends BaseTool {
   }
 
   onVCBInput(value: string): void {
-    // VCB shows measured angle; no input action
+    if (this.step !== 2 || !this.center || !this.baselinePoint) return;
+
+    const deg = parseFloat(value.replace('°', '').trim());
+    if (isNaN(deg)) return;
+
+    this.currentAngle = deg;
+
+    // Compute the guide direction at the exact angle from the baseline
+    const baseDir = vec3.normalize(vec3.sub(this.baselinePoint, this.center));
+    const rad = degToRad(deg);
+
+    // Rotate baseDir around Y axis by the angle (ground plane rotation)
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const guideDir: Vec3 = {
+      x: baseDir.x * cos - baseDir.z * sin,
+      y: baseDir.y,
+      z: baseDir.x * sin + baseDir.z * cos,
+    };
+
+    const guideEnd = vec3.add(this.center, vec3.mul(guideDir, 50));
+    this.viewport.renderer.addGuideLine(
+      `protractor-${Date.now()}`,
+      this.center,
+      guideEnd,
+      { r: 0.6, g: 0, b: 0.8 },
+      true,
+    );
+
+    this.setStatus(`Guide placed at ${deg.toFixed(1)}°`);
+    this.reset();
   }
 
   getVCBLabel(): string {
     return this.step === 2 ? 'Angle' : '';
   }
 
-  // ── Private ────────────────────────────────────────────
+  getPreview(): ToolPreview | null {
+    if (!this.center || !this.currentPoint) return null;
+
+    const lines: Array<{ from: Vec3; to: Vec3 }> = [];
+
+    if (this.step === 1) {
+      // Show line from center to cursor (baseline preview)
+      lines.push({ from: this.center, to: this.currentPoint });
+    } else if (this.step === 2 && this.baselinePoint) {
+      // Show baseline + current angle line
+      lines.push({ from: this.center, to: this.baselinePoint });
+      lines.push({ from: this.center, to: this.currentPoint });
+    }
+
+    return lines.length > 0 ? { lines } : null;
+  }
+
+  private placeGuide(): void {
+    if (!this.center || !this.currentPoint) return;
+
+    const dir = vec3.normalize(vec3.sub(this.currentPoint, this.center));
+    if (vec3.lengthSq(dir) < 0.001) return;
+
+    const guideEnd = vec3.add(this.center, vec3.mul(dir, 50));
+    this.viewport.renderer.addGuideLine(
+      `protractor-${Date.now()}`,
+      this.center,
+      guideEnd,
+      { r: 0.6, g: 0, b: 0.8 },
+      true,
+    );
+
+    this.setStatus(`Guide placed at ${this.currentAngle.toFixed(1)}°`);
+    this.reset();
+  }
 
   private reset(): void {
     this.center = null;
     this.baselinePoint = null;
+    this.currentPoint = null;
     this.currentAngle = 0;
     this.step = 0;
     this.setPhase('idle');

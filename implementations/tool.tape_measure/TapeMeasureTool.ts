@@ -2,7 +2,7 @@
 // Tape measure: click two points to measure, optionally create construction guides
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
@@ -15,8 +15,8 @@ export class TapeMeasureTool extends BaseTool {
   readonly cursor = 'crosshair';
 
   private startPoint: Vec3 | null = null;
+  private currentPoint: Vec3 | null = null;
   private createGuides = true;
-  private guideId: string | null = null;
 
   activate(): void {
     super.activate();
@@ -25,93 +25,122 @@ export class TapeMeasureTool extends BaseTool {
   }
 
   deactivate(): void {
-    this.cleanupGuide();
     this.reset();
     super.deactivate();
   }
 
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
-    const point = this.resolvePoint(event);
+
+    // @archigraph tool.tape_measure
+    const point = this.getStandardDrawPoint(event, this.startPoint ?? undefined);
     if (!point) return;
 
     if (this.phase === 'idle') {
+      // First click: set start point and create vertex
       this.startPoint = point;
+      this.findOrCreateVertex(point);
       this.setPhase('drawing');
-      this.setStatus('Click second point to measure distance.');
+      this.setStatus('Click second point to measure distance, or type a distance and press Enter.');
     } else if (this.phase === 'drawing') {
-      const dist = vec3.distance(this.startPoint!, point);
-      this.setVCBValue(dist.toFixed(4));
-      this.setStatus(`Distance: ${dist.toFixed(4)}`);
-
-      if (this.createGuides) {
-        // Create a construction guide line
-        this.viewport.renderer.addGuideLine(
-          `guide-${Date.now()}`,
-          this.startPoint!,
-          point,
-          { r: 0, g: 0, b: 0, a: 0.5 },
-          true,
-        );
-      }
-
-      this.reset();
-      this.setPhase('idle');
+      // Second click: measure and create guide
+      this.completeMeasurement(point);
     }
   }
 
   onMouseMove(event: ToolMouseEvent): void {
-    if (this.phase !== 'drawing' || !this.startPoint) return;
-    const point = this.resolvePoint(event);
+    const point = this.getStandardDrawPoint(event, this.startPoint ?? undefined);
     if (!point) return;
 
-    const dist = vec3.distance(this.startPoint, point);
-    this.setVCBValue(dist.toFixed(4));
+    this.currentPoint = point;
 
-    // Show temporary guide line
-    this.cleanupGuide();
-    this.guideId = `tape-preview-${Date.now()}`;
-    this.viewport.renderer.addGuideLine(
-      this.guideId,
-      this.startPoint,
-      point,
-      { r: 0.5, g: 0.5, b: 0.5, a: 0.5 },
-      true,
-    );
+    if (this.phase === 'drawing' && this.startPoint) {
+      const dist = vec3.distance(this.startPoint, point);
+      this.setVCBValue(dist.toFixed(4));
+    }
   }
 
   onKeyDown(event: ToolKeyEvent): void {
     if (event.key === 'Escape') {
-      this.cleanupGuide();
       this.reset();
-      this.setStatus('Click to place first measurement point.');
+      this.setStatus('Click to place first measurement point. Ctrl to toggle guide creation.');
+      return;
     }
 
     if (event.key === 'Control') {
       this.createGuides = !this.createGuides;
       this.setStatus(this.createGuides ? 'Guide creation ON' : 'Guide creation OFF');
+      return;
     }
+
+    // Arrow keys for drawing plane
+    this.handleArrowKeyPlane(event);
   }
 
+  // @archigraph tool.tape_measure
   onVCBInput(value: string): void {
-    // VCB shows measured distance; no input action needed for measurement mode
+    // VCB input: type a distance after first click to create guide at exact distance
+    if (this.phase !== 'drawing' || !this.startPoint || !this.currentPoint) return;
+
+    const dist = this.parseDistance(value);
+    if (isNaN(dist) || dist <= 0) return;
+
+    // Compute direction from start to current cursor position
+    const delta = vec3.sub(this.currentPoint, this.startPoint);
+    const len = vec3.length(delta);
+    if (len < 1e-10) return;
+
+    const direction = vec3.normalize(delta);
+    const endPoint: Vec3 = vec3.add(this.startPoint, vec3.mul(direction, dist));
+
+    this.completeMeasurement(endPoint);
   }
 
   getVCBLabel(): string {
     return this.phase === 'drawing' ? 'Distance' : '';
   }
 
+  getPreview(): ToolPreview | null {
+    // Show live preview line from first click to cursor
+    if (this.phase !== 'drawing' || !this.startPoint || !this.currentPoint) {
+      return null;
+    }
+
+    return {
+      lines: [{ from: this.startPoint, to: this.currentPoint }],
+    };
+  }
+
   // ── Private ────────────────────────────────────────────
+
+  private completeMeasurement(endPoint: Vec3): void {
+    if (!this.startPoint) return;
+
+    const dist = vec3.distance(this.startPoint, endPoint);
+    this.findOrCreateVertex(endPoint);
+
+    // Display distance in VCB and status bar
+    this.setVCBValue(dist.toFixed(4));
+    this.setStatus(`Distance: ${dist.toFixed(4)}`);
+
+    // Create a construction guide line between the two points
+    if (this.createGuides) {
+      // @archigraph calls|tool.tape_measure|data.scene|interaction
+      this.viewport.renderer.addGuideLine(
+        `guide-${Date.now()}`,
+        this.startPoint,
+        endPoint,
+        { r: 0, g: 0, b: 0, a: 0.5 },
+        true,
+      );
+    }
+
+    this.reset();
+  }
 
   private reset(): void {
     this.startPoint = null;
+    this.currentPoint = null;
     this.setPhase('idle');
-  }
-
-  private cleanupGuide(): void {
-    if (this.guideId) {
-      this.viewport.renderer.removeGuideLine(this.guideId);
-      this.guideId = null;
-    }
   }
 }
