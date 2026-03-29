@@ -154,6 +154,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const app = appRef.current;
     if (!app) return;
 
+    // Pop dimension snapshot and remove dimensions added since that snapshot
+    const { dimensionStore } = require('../tool.dimension/DimensionStore');
+    const toRemove: string[] = dimensionStore.popSnapshot();
+    for (const dimId of toRemove) {
+      const dim = dimensionStore.remove(dimId);
+      if (dim) {
+        for (const lineId of dim.guideLineIds) {
+          app.viewport.renderer.removeGuideLine(lineId);
+        }
+        const overlayScene = (app.viewport.renderer as any).getOverlayScene?.();
+        if (overlayScene && dim.sprite.parent) {
+          dim.sprite.parent.remove(dim.sprite);
+          dim.sprite.material.dispose();
+          if ((dim.sprite.material as any).map) (dim.sprite.material as any).map.dispose();
+        }
+        (app.viewport.renderer as any).unregisterEntityObject?.(dim.id);
+      }
+    }
+
     app.document.history.undo();
     if ('syncScene' in app) (app as any).syncScene();
     if ('syncSelection' in app) {

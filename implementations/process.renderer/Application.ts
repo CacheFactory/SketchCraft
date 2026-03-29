@@ -146,6 +146,53 @@ export class Application implements IApplication {
   /** Sync geometry to scene after tool operations. */
   syncScene(): void {
     this.sceneBridge.sync();
+    this.syncDimensions();
+  }
+
+  /** Update associative dimensions when geometry moves, remove orphaned ones on undo. */
+  private syncDimensions(): void {
+    const { dimensionStore } = require('../tool.dimension/DimensionStore');
+    const { vec3 } = require('../../src/core/math');
+
+    // Remove dimensions whose vertices were undone/deleted
+    const removed = dimensionStore.reconcile(this.document.geometry);
+    for (const dim of removed) {
+      // Remove guide lines
+      for (const lineId of dim.guideLineIds) {
+        this.viewport.renderer.removeGuideLine(lineId);
+      }
+      // Remove sprite from overlay scene
+      const overlayScene = (this.viewport.renderer as any).getOverlayScene?.();
+      if (overlayScene && dim.sprite.parent) {
+        dim.sprite.parent.remove(dim.sprite);
+        dim.sprite.material.dispose();
+        if ((dim.sprite.material as any).map) (dim.sprite.material as any).map.dispose();
+      }
+      // Unregister from renderer
+      (this.viewport.renderer as any).unregisterEntityObject?.(dim.id);
+    }
+
+    // Update surviving dimensions that track moved vertices
+    const updates = dimensionStore.syncToGeometry(this.document.geometry);
+    const dimColor = { r: 0.2, g: 0.2, b: 0.2 };
+    const tickSize = 0.08;
+
+    for (const { dim, dimStart, dimEnd, extStart1, extStart2, offsetDir } of updates) {
+      const ids = dim.guideLineIds;
+      if (ids.length >= 5) {
+        this.viewport.renderer.addGuideLine(ids[0], extStart1, dimStart, dimColor, true);
+        this.viewport.renderer.addGuideLine(ids[1], extStart2, dimEnd, dimColor, true);
+        this.viewport.renderer.addGuideLine(ids[2], dimStart, dimEnd, dimColor, false);
+
+        const tick1a = vec3.add(dimStart, vec3.mul(offsetDir, tickSize));
+        const tick1b = vec3.add(dimStart, vec3.mul(offsetDir, -tickSize));
+        this.viewport.renderer.addGuideLine(ids[3], tick1a, tick1b, dimColor, false);
+
+        const tick2a = vec3.add(dimEnd, vec3.mul(offsetDir, tickSize));
+        const tick2b = vec3.add(dimEnd, vec3.mul(offsetDir, -tickSize));
+        this.viewport.renderer.addGuideLine(ids[4], tick2a, tick2b, dimColor, false);
+      }
+    }
   }
 
   /** Sync selection highlights to the 3D renderer and return current selection state. */

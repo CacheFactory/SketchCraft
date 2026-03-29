@@ -2,13 +2,23 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useApp } from '../window.main/AppContext';
 import { Application } from '../process.renderer/Application';
+import { TextInputDialog, TextInputResult } from '../window.main/TextInputDialog';
+import { TextTool, TextPlacementRequest } from '../tool.text/textTool';
 import type { ToolMouseEvent } from '../../src/core/interfaces';
+import type { Vec3 } from '../../src/core/types';
+
+interface TextDialogState {
+  screenX: number;
+  screenY: number;
+  worldPoint: Vec3;
+}
 
 export function ViewportCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const appInstanceRef = useRef<Application | null>(null);
   const { setApp, activateTool, updateState } = useApp();
   const [dragBox, setDragBox] = useState<{ x: number; y: number; w: number; h: number; mode: string } | null>(null);
+  const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
 
   /** Push selection state from the app into React context. */
   const syncSelectionToUI = useCallback(() => {
@@ -59,6 +69,15 @@ export function ViewportCanvas() {
       setApp(app);
       activateTool('tool.select');
       (window as any).__debugApp = app;
+
+      // Wire up text tool dialog callback
+      const textTool = app.toolManager.getTool('tool.text') as TextTool | undefined;
+      if (textTool) {
+        textTool.onRequestTextInput = (req: TextPlacementRequest) => {
+          setTextDialog({ screenX: req.screenX, screenY: req.screenY, worldPoint: req.worldPoint });
+        };
+      }
+
       console.log('Application fully initialized');
     }).catch(err => {
       console.error('Failed to initialize application:', err);
@@ -152,11 +171,12 @@ export function ViewportCanvas() {
       break;
     }
 
-    // Snap to nearby vertex endpoints for draw tools only
+    // Snap to nearby vertex endpoints for draw/measure/construct/modify tools
     const activeTool = app.toolManager.getActiveTool();
-    const isDrawTool = activeTool?.category === 'draw';
+    const snapCategories = new Set(['draw', 'measure', 'construct', 'modify']);
+    const isSnapTool = activeTool ? snapCategories.has(activeTool.category) : false;
 
-    if (isDrawTool && app.sceneBridge) {
+    if (isSnapTool && app.sceneBridge) {
       const snapped = app.sceneBridge.findSnapPoint(
         screenX, screenY, worldPoint,
         app.viewport.getWidth(), app.viewport.getHeight(),
@@ -336,6 +356,28 @@ export function ViewportCanvas() {
             top: dragBox.y,
             width: dragBox.w,
             height: dragBox.h,
+          }}
+        />
+      )}
+      {textDialog && (
+        <TextInputDialog
+          x={textDialog.screenX}
+          y={textDialog.screenY}
+          onSubmit={(result: TextInputResult) => {
+            const app = appInstanceRef.current;
+            const textTool = app?.toolManager.getActiveTool() as TextTool | undefined;
+            if (textTool?.placeText) {
+              textTool.placeText(result);
+            }
+            setTextDialog(null);
+          }}
+          onCancel={() => {
+            const app = appInstanceRef.current;
+            const textTool = app?.toolManager.getActiveTool() as TextTool | undefined;
+            if (textTool?.cancelPlacement) {
+              textTool.cancelPlacement();
+            }
+            setTextDialog(null);
           }}
         />
       )}

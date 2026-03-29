@@ -534,7 +534,9 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: "Click origin, drag to scale. Live preview. VCB for exact factor.\n          Scales from origin point uniformly."
+      description: "Shows 9 green grip handles (4 corners + 4 edge midpoints + 1 center) with yellow\n\
+        \        bounding box and dotted extension lines. Edge midpoint grips constrain scaling to single\n\
+        \        axis (moves just that side). Corner grips scale both axes. Grips maintain constant screen size."
   uuid: PIor44v3
 - id: tool.offset
   kind: tool
@@ -718,11 +720,12 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: placeholder
+      status: implemented
     docs:
-      description: Add dimension annotations to the model. Click two points to create a linear dimension with leader lines
-        and measurement text. Dimensions update when the geometry changes (associative). Supports linear, radial, and angular
-        dimensions. Dimensions appear in a dedicated annotation layer.
+      description: "Three-step workflow (start, end, offset) places linear dimensions with extension lines,\n\
+        \        tick marks, and text sprite. Dimensions are selectable and movable (constrained perpendicular\n\
+        \        to measurement line). Associative — tracks vertex IDs and updates when geometry moves.\n\
+        \        Supports undo. Uses DimensionStore singleton for state management."
   uuid: gHVP0JyU
 - id: tool.text
   kind: tool
@@ -739,9 +742,9 @@ nodes:
       complexity: simple
       status: implemented
     docs:
-      description: "Click to place, type text in VCB, press Enter. Creates Three.js Sprite with\n          CanvasTexture (white\
-        \ rounded-rect background, bold text). Billboard behavior (always faces\n          camera). Positioned in overlay\
-        \ scene. Non-raycastable."
+      description: "Creates real vector geometry (edges + faces) using Three.js Font system.\n          Opens floating dialog\
+        \ with text input, font selection (Helvetica, Gentilis, Optimer + bold variants),\n          size, and color. Text\
+        \ placed as actual edges/faces on the ground plane — selectable, movable, push/pullable."
   uuid: LUHz0ZsR
 - id: gesture.click
   kind: gesture
@@ -891,12 +894,11 @@ nodes:
       complexity: very-complex
       status: implemented
     docs:
-      description: "Three.js WebGL renderer with ambient+directional+hemisphere lighting.\n          Infinite shader-based\
-        \ ground grid. Selection highlight swaps face materials (polygonOffset -1)\n          and edge materials (glow tube\
-        \ cylinder for visible thickness). Pre-selection uses orange,\n          selection uses blue. Edge lines in overlay\
-        \ scene (separate render pass after depth clear).\n          Raycasts both main scene (faces) and overlay scene (edges).\
-        \ Edge hit threshold scales\n          with camera distance (2% of distance). Edges prioritized over faces in raycast\
-        \ results."
+      description: "Three.js WebGL renderer with ambient+directional+hemisphere lighting, logarithmicDepthBuffer,\n\
+        \        and localClippingEnabled. Infinite shader-based ground grid. Selection highlight swaps face\n\
+        \        materials (polygonOffset -1) and edge materials (camera-distance-scaled glow tube cylinders).\n\
+        \        Pre-selection=orange, selection=blue. Edge lines in overlay scene (separate pass after depth\n\
+        \        clear). setSectionPlane() for real-time clipping. Edges prioritized over faces in raycast."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -2169,12 +2171,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: placeholder
+      status: implemented
     docs:
-      description: Create and manipulate section planes that cut through the model to reveal interior geometry. Click a face
-        to place a section plane aligned to that face's normal. Section planes can be moved, rotated, and toggled active/inactive.
-        Active section planes clip all geometry behind the plane in the viewport. Section fill (hatching) shows cut faces.
-        Multiple section planes supported but only one active at a time.
+      description: "Click a face to place a section plane aligned to that face's normal. Uses real Three.js\n\
+        \        clipping planes via WebGLRenderer.setSectionPlane(). Visual orange rectangle with cross at\n\
+        \        placement. Escape clears all planes. Multiple planes tracked, one active at a time."
   uuid: dhw8Tl5i
 - id: op.fillet
   kind: operation

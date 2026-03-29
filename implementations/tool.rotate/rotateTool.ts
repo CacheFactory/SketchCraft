@@ -40,7 +40,7 @@ export class RotateTool extends BaseTool {
 
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
-    const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+    const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
 
     if (this.step === 0) {
@@ -64,7 +64,7 @@ export class RotateTool extends BaseTool {
 
   onMouseMove(event: ToolMouseEvent): void {
     if (this.step !== 2 || !this.center || !this.startAngleRef) return;
-    const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+    const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
 
     const v1 = vec3.normalize(vec3.sub(this.startAngleRef, this.center));

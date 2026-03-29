@@ -125,12 +125,14 @@ export class WebGLRenderer implements IRenderer {
       antialias: true,
       alpha: false,
       powerPreference: 'high-performance',
+      logarithmicDepthBuffer: true,
     });
     this._renderer.setSize(width, height);
     this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this._renderer.shadowMap.enabled = true;
     this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this._renderer.autoClear = false;
+    this._renderer.localClippingEnabled = true;
     this._renderer.outputColorSpace = THREE.SRGBColorSpace;
     this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this._renderer.toneMappingExposure = 1.0;
@@ -363,7 +365,11 @@ export class WebGLRenderer implements IRenderer {
         const dir = new THREE.Vector3().subVectors(p2, p1);
         const len = dir.length();
         if (len > 0.001) {
-          const tubeRadius = 0.03;
+          // Scale tube radius by camera distance so highlight looks constant on screen
+          const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+          const camPos = this._cameraController.getThreeCamera().position;
+          const camDist = mid.distanceTo(camPos);
+          const tubeRadius = Math.max(camDist * 0.003, 0.005);
           const tubeGeo = new THREE.CylinderGeometry(tubeRadius, tubeRadius, len, 6, 1);
           tubeGeo.rotateX(Math.PI / 2);
           const color = mode === 'selection' ? 0x00aaff : 0xff8800;
@@ -489,6 +495,39 @@ export class WebGLRenderer implements IRenderer {
     this._axes.visible = visible;
   }
 
+  setSectionPlane(plane: { point: Vec3; normal: Vec3 } | null): void {
+    if (!plane) {
+      // Clear clipping on all scene materials
+      this._scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).material) {
+          const mat = (obj as THREE.Mesh).material as THREE.Material;
+          if (Array.isArray(mat)) {
+            mat.forEach(m => { m.clippingPlanes = []; });
+          } else {
+            mat.clippingPlanes = [];
+          }
+        }
+      });
+      return;
+    }
+
+    const { point, normal } = plane;
+    const n = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
+    const constant = -n.dot(new THREE.Vector3(point.x, point.y, point.z));
+    const clipPlane = new THREE.Plane(n, constant);
+
+    this._scene.traverse((obj) => {
+      if ((obj as THREE.Mesh).material) {
+        const mat = (obj as THREE.Mesh).material as THREE.Material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => { m.clippingPlanes = [clipPlane]; });
+        } else {
+          mat.clippingPlanes = [clipPlane];
+        }
+      }
+    });
+  }
+
   // ─── Private ───────────────────────────────────────────────────
 
   private _setupLighting(): void {
@@ -506,7 +545,7 @@ export class WebGLRenderer implements IRenderer {
     this._sunLight.shadow.camera.bottom = -50;
     this._sunLight.shadow.camera.near = 0.1;
     this._sunLight.shadow.camera.far = 200;
-    this._sunLight.shadow.bias = -0.001;
+    this._sunLight.shadow.bias = -0.005;
     this._scene.add(this._sunLight);
 
     // Hemisphere light for softer fill

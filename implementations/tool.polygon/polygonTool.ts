@@ -39,7 +39,7 @@ export class PolygonTool extends BaseTool {
     this.lastScreenY = event.screenY;
 
     if (this.phase === 'idle') {
-      const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+      const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
       if (!point) return;
       this.center = point;
       this.beginTransaction('Draw Polygon');

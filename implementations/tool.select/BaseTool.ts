@@ -130,8 +130,10 @@ export abstract class BaseTool implements ITool {
     return value.split(',').map(s => parseFloat(s.trim()));
   }
 
-  /** Begin an undo transaction. */
+  /** Begin an undo transaction. Also snapshots dimension state. */
   protected beginTransaction(name: string): void {
+    const { dimensionStore } = require('../tool.dimension/DimensionStore');
+    dimensionStore.pushSnapshot();
     this.document.history.beginTransaction(name);
   }
 

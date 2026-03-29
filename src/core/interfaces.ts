@@ -423,6 +423,9 @@ export interface IRenderer {
   clearGuideLines(): void;
   setGridVisible(visible: boolean): void;
   setAxesVisible(visible: boolean): void;
+
+  /** Set or clear a section clipping plane. Pass null to clear. */
+  setSectionPlane(plane: { point: Vec3; normal: Vec3 } | null): void;
 }
 
 // ─── Viewport ────────────────────────────────────────────────────

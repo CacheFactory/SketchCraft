@@ -43,18 +43,19 @@ export class SceneBridge {
       roughness: 0.7,
       metalness: 0.0,
       side: THREE.DoubleSide,
-      flatShading: false, // Smooth shading hides internal triangle edges
+      flatShading: false,
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
 
+    // Back-face material no longer used — DoubleSide on faceMaterial handles both sides.
+    // Kept for API compatibility but not added to scene.
     this.backFaceMaterial = new THREE.MeshStandardMaterial({
       color: 0x8888cc,
       roughness: 0.7,
       metalness: 0.0,
       side: THREE.BackSide,
-      flatShading: true,
     });
 
     this.edgeMaterial = new THREE.LineBasicMaterial({
@@ -249,15 +250,26 @@ export class SceneBridge {
     const verts = this.engine.getFaceVertices(id);
     if (verts.length < 3) return;
 
+    // Nudge vertex positions slightly along face normal to prevent z-fighting
+    // between coplanar adjacent faces. Applied to buffer data only — geometry
+    // engine keeps true coplanar positions. Nudge is per-face-id so each face
+    // gets a unique micro-offset.
+    const n = face.normal;
+    const nudge = this.faceNudge(id);
+    const nx = n.x * nudge;
+    const ny = n.y * nudge;
+    const nz = n.z * nudge;
+
     // Build triangle geometry (fan triangulation)
     const positions: number[] = [];
     const normals: number[] = [];
-    const n = face.normal;
 
     for (let i = 1; i < verts.length - 1; i++) {
-      positions.push(verts[0].position.x, verts[0].position.y, verts[0].position.z);
-      positions.push(verts[i].position.x, verts[i].position.y, verts[i].position.z);
-      positions.push(verts[i + 1].position.x, verts[i + 1].position.y, verts[i + 1].position.z);
+      positions.push(
+        verts[0].position.x + nx, verts[0].position.y + ny, verts[0].position.z + nz,
+        verts[i].position.x + nx, verts[i].position.y + ny, verts[i].position.z + nz,
+        verts[i + 1].position.x + nx, verts[i + 1].position.y + ny, verts[i + 1].position.z + nz,
+      );
       normals.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z);
     }
 
@@ -266,7 +278,7 @@ export class SceneBridge {
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
 
     if (this.faceGroups.has(id)) {
-      // Update: replace geometry on existing meshes
+      // Update: replace geometry on existing mesh
       const group = this.faceGroups.get(id)!;
       group.traverse(child => {
         if (child instanceof THREE.Mesh) {
@@ -275,28 +287,23 @@ export class SceneBridge {
         }
       });
     } else {
-      // Create new group with front + back meshes
+      // Create single DoubleSide mesh (no separate back mesh)
       const group = new THREE.Group();
       group.name = `face-${id}`;
       group.userData.entityId = id;
       group.userData.entityType = 'face';
 
-      const frontMesh = new THREE.Mesh(geometry, this.faceMaterial.clone());
-      frontMesh.castShadow = true;
-      frontMesh.receiveShadow = true;
-      frontMesh.userData.entityId = id;
-      frontMesh.userData.entityType = 'face';
+      const mesh = new THREE.Mesh(geometry, this.faceMaterial.clone());
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+      mesh.userData.entityId = id;
+      mesh.userData.entityType = 'face';
 
-      const backMesh = new THREE.Mesh(geometry, this.backFaceMaterial.clone());
-      backMesh.userData.entityId = id;
-
-      group.add(frontMesh);
-      group.add(backMesh);
+      group.add(mesh);
 
       this.scene.add(group);
       this.faceGroups.set(id, group);
-      // Register the frontMesh for raycasting (it has the entityId)
-      this.webglRenderer.registerEntityObject(id, frontMesh);
+      this.webglRenderer.registerEntityObject(id, mesh);
     }
   }
 
@@ -481,17 +488,28 @@ export class SceneBridge {
     return worldPoint;
   }
 
+  /** Scale snap marker so it appears constant size on screen regardless of zoom. */
+  private scaleMarkerToCamera(point: { x: number; y: number; z: number }, camera: any): void {
+    const camPos = camera.position || { x: 0, y: 10, z: 10 };
+    const dx = point.x - camPos.x;
+    const dy = point.y - camPos.y;
+    const dz = point.z - camPos.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    // Scale factor: keep marker visually prominent at any distance
+    const s = Math.max(dist * 0.04, 0.04);
+    this.snapMarker.scale.set(s, s, s);
+  }
+
   /** Show the green snap marker at a snapped endpoint. */
   private showSnapMarker(point: { x: number; y: number; z: number }, camera: any): void {
     this.snapMarker.position.set(point.x, point.y, point.z);
     this.snapMarker.visible = true;
     this.snapActive = true;
 
-    // Make the ring face the camera
     const camPos = camera.position;
     this.snapMarkerRing.lookAt(camPos.x, camPos.y, camPos.z);
+    this.scaleMarkerToCamera(point, camera);
 
-    // Green = snapped
     (this.snapMarkerDot.material as THREE.MeshBasicMaterial).color.setHex(0x00cc44);
     (this.snapMarkerRing.material as THREE.MeshBasicMaterial).color.setHex(0x00cc44);
     this.snapMarkerRing.visible = true;
@@ -503,14 +521,13 @@ export class SceneBridge {
     this.snapMarker.visible = true;
     this.snapActive = false;
 
-    // Make the ring face the camera
     const camPos = camera.position;
     this.snapMarkerRing.lookAt(camPos.x, camPos.y, camPos.z);
+    this.scaleMarkerToCamera(point, camera);
 
-    // Blue = not snapped, just cursor position
     (this.snapMarkerDot.material as THREE.MeshBasicMaterial).color.setHex(0x3388ff);
     (this.snapMarkerRing.material as THREE.MeshBasicMaterial).color.setHex(0x3388ff);
-    this.snapMarkerRing.visible = false; // Only show dot when not snapped
+    this.snapMarkerRing.visible = false;
   }
 
   hideSnapMarker(): void {
@@ -526,6 +543,20 @@ export class SceneBridge {
    * Find the intersection point of two 3D line segments, if they intersect
    * or nearly intersect (within tolerance). Returns null if no intersection.
    */
+  /**
+   * Compute a tiny deterministic normal-offset for a face to prevent
+   * z-fighting between coplanar adjacent faces. Each face id hashes
+   * to a unique micro-offset in the range [0.0001, 0.001].
+   */
+  private faceNudge(id: string): number {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+    }
+    // Map to [0.0001 .. 0.001] — invisible but enough to break depth ties
+    return 0.0001 + (Math.abs(hash) % 900) * 0.000001;
+  }
+
   private edgeEdgeIntersection(
     a1: { x: number; y: number; z: number }, a2: { x: number; y: number; z: number },
     b1: { x: number; y: number; z: number }, b2: { x: number; y: number; z: number },

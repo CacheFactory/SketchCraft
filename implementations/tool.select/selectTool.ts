@@ -3,7 +3,10 @@
 // Uses hitEntityId from event (raycasted by ViewportCanvas) for reliable detection.
 
 import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
+import type { Vec3 } from '../../src/core/types';
+import { vec3 } from '../../src/core/math';
 import { BaseTool } from './BaseTool';
+import { dimensionStore } from '../tool.dimension/DimensionStore';
 
 export class SelectTool extends BaseTool {
   readonly id = 'tool.select';
@@ -19,6 +22,9 @@ export class SelectTool extends BaseTool {
   private lastClickTime = 0;
   private readonly DOUBLE_CLICK_MS = 400;
   private readonly DRAG_THRESHOLD = 8;
+
+  /** If dragging a dimension text, its ID. */
+  private draggingDimId: string | null = null;
 
   /** Returns the drag box rectangle for visual rendering, or null if not dragging. */
   getDragBox(): { x: number; y: number; width: number; height: number; mode: 'window' | 'crossing' } | null {
@@ -74,6 +80,13 @@ export class SelectTool extends BaseTool {
       }
     }
 
+    // Check if clicking a dimension text — start dimension drag
+    if (event.hitEntityId && dimensionStore.isDimensionEntity(event.hitEntityId)) {
+      this.draggingDimId = event.hitEntityId;
+      this.setStatus('Drag to reposition dimension text.');
+      return;
+    }
+
     // Instant point-pick using the pre-computed raycast hit
     if (event.hitEntityId) {
       if (event.shiftKey) {
@@ -94,11 +107,51 @@ export class SelectTool extends BaseTool {
   }
 
   onMouseMove(event: ToolMouseEvent): void {
+    // Dragging a dimension — constrained to perpendicular of measurement line
+    if (this.draggingDimId) {
+      const dim = dimensionStore.get(this.draggingDimId);
+      if (dim && event.worldPoint) {
+        // Project cursor onto the offset direction to get new offset distance
+        const toCursor = vec3.sub(event.worldPoint, dim.startPoint);
+        const newOffsetDist = vec3.dot(toCursor, dim.offsetDir);
+
+        // Reposition dimension (sprite, compute new positions)
+        const positions = dimensionStore.reposition(this.draggingDimId, newOffsetDist);
+        if (positions) {
+          // Update all guide lines
+          const ids = dim.guideLineIds;
+          const dimColor = { r: 0.2, g: 0.2, b: 0.2 };
+          const tickSize = 0.08;
+
+          // ids[0] = ext1, ids[1] = ext2, ids[2] = main, ids[3] = tick1, ids[4] = tick2
+          if (ids.length >= 5) {
+            this.viewport.renderer.addGuideLine(ids[0], positions.extStart1, positions.dimStart, dimColor, true);
+            this.viewport.renderer.addGuideLine(ids[1], positions.extStart2, positions.dimEnd, dimColor, true);
+            this.viewport.renderer.addGuideLine(ids[2], positions.dimStart, positions.dimEnd, dimColor, false);
+
+            const tick1a = vec3.add(positions.dimStart, vec3.mul(positions.offsetDir, tickSize));
+            const tick1b = vec3.add(positions.dimStart, vec3.mul(positions.offsetDir, -tickSize));
+            this.viewport.renderer.addGuideLine(ids[3], tick1a, tick1b, dimColor, false);
+
+            const tick2a = vec3.add(positions.dimEnd, vec3.mul(positions.offsetDir, tickSize));
+            const tick2b = vec3.add(positions.dimEnd, vec3.mul(positions.offsetDir, -tickSize));
+            this.viewport.renderer.addGuideLine(ids[4], tick2a, tick2b, dimColor, false);
+          }
+        }
+      }
+      return;
+    }
+
     if (this.phase === 'idle') {
       // Pre-selection highlight + cursor change
       if (event.hitEntityId) {
-        this.document.selection.setPreSelection(event.hitEntityId);
-        this.setCursorPointer(true);
+        // Show move cursor for dimension entities
+        if (dimensionStore.isDimensionEntity(event.hitEntityId)) {
+          this.setCursorPointer(true);
+        } else {
+          this.document.selection.setPreSelection(event.hitEntityId);
+          this.setCursorPointer(true);
+        }
       } else {
         this.document.selection.setPreSelection(null);
         this.setCursorPointer(false);
@@ -125,6 +178,14 @@ export class SelectTool extends BaseTool {
 
   onMouseUp(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
+
+    // Finish dimension drag
+    if (this.draggingDimId) {
+      this.setStatus('Dimension text repositioned.');
+      this.draggingDimId = null;
+      this.setPhase('idle');
+      return;
+    }
 
     if (this.isDragging && this.dragStart) {
       const x = Math.min(this.dragStart.x, event.screenX);

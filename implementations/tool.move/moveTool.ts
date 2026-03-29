@@ -60,7 +60,7 @@ export class MoveTool extends BaseTool {
         return;
       }
 
-      const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+      const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
       if (!point) return;
 
       this.origin = point;
@@ -80,7 +80,7 @@ export class MoveTool extends BaseTool {
   onMouseMove(event: ToolMouseEvent): void {
     if (this.phase !== 'drawing' || !this.origin) return;
 
-    const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+    const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
 
     this.currentDest = point;

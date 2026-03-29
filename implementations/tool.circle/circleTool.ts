@@ -35,7 +35,7 @@ export class CircleTool extends BaseTool {
     if (event.button !== 0) return;
 
     if (this.phase === 'idle') {
-      const point = this.resolvePoint(event) ?? this.screenToDrawingPlane(event);
+      const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
       if (!point) return;
 
       this.center = point;

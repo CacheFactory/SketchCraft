@@ -28,8 +28,10 @@ function AppLayout() {
       // Arrow keys always go to tools, even from input fields
       const isArrow = e.key.startsWith('Arrow');
 
-      // Don't handle tool shortcuts if focused on input (except arrow keys)
-      if ((e.target as HTMLElement).tagName === 'INPUT' && !isArrow) return;
+      // Don't handle tool shortcuts if focused on input/select or inside a dialog
+      const tag = (e.target as HTMLElement).tagName;
+      if ((tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') && !isArrow) return;
+      if ((e.target as HTMLElement).closest('.text-input-dialog')) return;
 
       const isMeta = e.metaKey || e.ctrlKey;
 
@@ -72,6 +74,7 @@ function AppLayout() {
               shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey, altKey: e.altKey,
             });
             appInst.syncScene();
+            appInst.syncSelection();
             if (appInst.sceneBridge) {
               const preview = tool.getPreview();
               appInst.sceneBridge.clearPreviewEdges();
@@ -85,6 +88,8 @@ function AppLayout() {
               vcbLabel: tool.getVCBLabel(),
               vcbValue: tool.getVCBValue(),
               statusText: tool.getStatusText(),
+              canUndo: appInst.document.history.canUndo,
+              canRedo: appInst.document.history.canRedo,
             });
           }
         }
