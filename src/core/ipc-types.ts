@@ -70,6 +70,7 @@ export interface MainProcessAPI {
   'prefs:set': (prefs: Partial<UserPreferences>) => Promise<void>;
   'native:boolean': (args: { op: 'union' | 'subtract' | 'intersect'; meshA: ArrayBuffer; meshB: ArrayBuffer }) => Promise<ArrayBuffer>;
   'native:step-import': (args: { data: ArrayBuffer }) => Promise<ArrayBuffer>;
+  'file:convert-skp': (args: { filePath: string }) => Promise<{ data: ArrayBuffer; filePath: string } | null>;
   'app:get-version': () => Promise<string>;
   'app:get-user-data-path': () => Promise<string>;
   'app:quit': () => Promise<void>;

@@ -16,6 +16,7 @@ const INVOKE_CHANNELS: ReadonlySet<string> = new Set<keyof MainProcessAPI>([
   'file:export',
   'file:import',
   'file:read',
+  'file:convert-skp',
   'file:write',
   'file:get-recent',
   'file:add-recent',

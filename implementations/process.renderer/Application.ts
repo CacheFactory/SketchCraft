@@ -36,6 +36,8 @@ import { DimensionTool } from '../tool.dimension/dimensionTool';
 import { TextTool } from '../tool.text/textTool';
 import { SectionPlaneTool } from '../tool.section_plane/SectionPlaneTool';
 import { SolidToolsTool } from '../tool.solid_tools/SolidToolsTool';
+import { AxesTool } from '../tool.axes/AxesTool';
+// SKP files are converted to OBJ by the native skp2obj tool in the main process
 
 export class Application implements IApplication {
   document!: IModelDocument;
@@ -109,6 +111,7 @@ export class Application implements IApplication {
       new TextTool(doc, vp, inf),
       new SectionPlaneTool(doc, vp, inf),
       new SolidToolsTool(doc, vp, inf),
+      new AxesTool(doc, vp, inf),
     ];
 
     for (const tool of tools) {
@@ -252,13 +255,25 @@ export class Application implements IApplication {
 
   async openDocument(): Promise<void> {
     if (typeof window.api === 'undefined') return;
-    const result = await window.api.invoke('file:import', { formats: ['.obj'] });
-    if (result) {
+    const result = await (window.api as any).invoke('file:open');
+    if (!result) return;
+
+    const ext = result.filePath.split('.').pop()?.toLowerCase();
+    if (ext === 'skp') {
+      // Convert SKP to OBJ using native skp2obj tool
+      const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
+      if (converted) {
+        this.importOBJ(converted.data);
+      } else {
+        console.error('Failed to convert SKP file');
+        return;
+      }
+    } else {
       this.importOBJ(result.data);
-      this.document.filePath = result.filePath;
-      this.document.markClean();
-      this.sceneBridge.sync();
     }
+    this.document.filePath = result.filePath;
+    this.document.markClean();
+    this.sceneBridge.sync();
   }
 
   async saveDocument(): Promise<void> {
@@ -380,10 +395,22 @@ export class Application implements IApplication {
   async importFile(): Promise<void> {
     if (typeof window.api === 'undefined') return;
     const result = await window.api.invoke('file:import', {
-      formats: ['.obj', '.stl', '.gltf', '.glb', '.dxf', '.step', '.stp', '.fbx'],
+      formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.dxf', '.step', '.stp', '.fbx'],
     });
     if (result) {
-      console.log(`Importing ${result.format} file: ${result.filePath}`);
+      const ext = result.format?.toLowerCase() || result.filePath?.split('.').pop()?.toLowerCase();
+      if (ext === 'skp') {
+        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
+        if (converted) {
+          this.importOBJ(converted.data);
+          this.sceneBridge.sync();
+        }
+      } else if (ext === 'obj') {
+        this.importOBJ(result.data);
+        this.sceneBridge.sync();
+      } else {
+        console.log(`Importing ${result.format} file: ${result.filePath}`);
+      }
     }
   }
 

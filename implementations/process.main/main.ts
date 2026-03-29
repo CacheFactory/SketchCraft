@@ -12,6 +12,7 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execFile } from 'child_process';
 import {
   UserPreferences,
   DEFAULT_PREFERENCES,
@@ -166,6 +167,7 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
+        { name: 'SketchUp Files', extensions: ['skp'] },
         { name: 'SketchCraft Files', extensions: ['skc'] },
         { name: 'All Files', extensions: ['*'] },
       ],
@@ -229,6 +231,7 @@ function registerIpcHandlers(): void {
         case 'step': return ['step', 'stp'];
         case 'dxf': return ['dxf'];
         case 'gltf': return ['gltf', 'glb'];
+        case 'skp': return ['skp'];
         default: return [f];
       }
     });
@@ -248,6 +251,35 @@ function registerIpcHandlers(): void {
       data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
       format: ext,
     };
+  });
+
+  // @archigraph file.skp
+  ipcMain.handle('file:convert-skp', async (_event, args: { filePath: string }) => {
+    // Convert .skp to .obj using the skp2obj tool (links against SketchUp C SDK)
+    const toolPath = path.join(__dirname, '..', 'tools', 'skp2obj');
+    const tmpObj = path.join(os.tmpdir(), `skp-${Date.now()}.obj`);
+
+    return new Promise<{ data: ArrayBuffer; filePath: string } | null>((resolve) => {
+      execFile(toolPath, [args.filePath, tmpObj], { timeout: 30000 }, (err, _stdout, stderr) => {
+        if (err) {
+          console.error('[skp2obj] conversion failed:', stderr || err.message);
+          resolve(null);
+          return;
+        }
+        console.log('[skp2obj]', stderr.trim());
+        try {
+          const objData = fs.readFileSync(tmpObj);
+          fs.unlinkSync(tmpObj);
+          resolve({
+            data: objData.buffer.slice(objData.byteOffset, objData.byteOffset + objData.byteLength),
+            filePath: args.filePath,
+          });
+        } catch (readErr) {
+          console.error('[skp2obj] failed to read output:', readErr);
+          resolve(null);
+        }
+      });
+    });
   });
 
   ipcMain.handle('file:read', async (_event, args: { filePath: string }) => {
