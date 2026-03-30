@@ -2,13 +2,14 @@
 // Synchronizes the geometry engine's B-Rep data with Three.js scene objects.
 
 import * as THREE from 'three';
-import type { IGeometryEngine, IFace, IEdge, ISceneManager } from '../../src/core/interfaces';
+import type { IGeometryEngine, IFace, IEdge, ISceneManager, IMaterialManager } from '../../src/core/interfaces';
 import type { WebGLRenderer } from './WebGLRenderer';
 import type { SceneManager } from '../data.scene/SceneManager';
 
 export class SceneBridge {
   private engine: IGeometryEngine;
   private sceneManager: SceneManager | null = null;
+  private materialManager: IMaterialManager | null = null;
   private webglRenderer: WebGLRenderer;
   private scene: THREE.Scene;
   private overlayScene: THREE.Scene;
@@ -25,6 +26,9 @@ export class SceneBridge {
   // Preview overlays
   private previewGroup: THREE.Group;
   private previewMaterial: THREE.LineDashedMaterial;
+
+  // Texture cache (data URL -> THREE.Texture)
+  private textureCache = new Map<string, THREE.Texture>();
 
   // Snap cursor marker
   private snapMarker: THREE.Group;
@@ -102,6 +106,41 @@ export class SceneBridge {
 
   setSceneManager(sm: SceneManager): void {
     this.sceneManager = sm;
+  }
+
+  setMaterialManager(mm: IMaterialManager): void {
+    this.materialManager = mm;
+  }
+
+  private getTexture(dataUrl: string): THREE.Texture {
+    let tex = this.textureCache.get(dataUrl);
+    if (tex) return tex;
+    tex = new THREE.TextureLoader().load(dataUrl);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.textureCache.set(dataUrl, tex);
+    return tex;
+  }
+
+  private applyMaterialDef(mat: THREE.MeshStandardMaterial, matDef: { color: { r: number; g: number; b: number }; opacity?: number; roughness?: number; metalness?: number; albedoMap?: string }): void {
+    mat.opacity = matDef.opacity ?? 1;
+    mat.transparent = mat.opacity < 1;
+    mat.roughness = matDef.roughness ?? 0.7;
+    mat.metalness = matDef.metalness ?? 0;
+    if (matDef.albedoMap) {
+      // When using a texture map, set color to white so Three.js doesn't
+      // multiply/darken the texture by the material color.
+      mat.color.setRGB(1, 1, 1);
+      mat.map = this.getTexture(matDef.albedoMap);
+      mat.needsUpdate = true;
+    } else {
+      mat.color.setRGB(matDef.color.r, matDef.color.g, matDef.color.b);
+      if (mat.map) {
+        mat.map = null;
+        mat.needsUpdate = true;
+      }
+    }
   }
 
   /** Full sync: rebuild Three.js scene from geometry engine state. */
@@ -260,30 +299,59 @@ export class SceneBridge {
     const ny = n.y * nudge;
     const nz = n.z * nudge;
 
+    // Compute UV basis from the face's own geometry so textures stick to the
+    // face when it moves or rotates. U axis = first edge direction, V axis =
+    // perpendicular within the face plane. Origin = first vertex.
+    const p0 = verts[0].position;
+    const p1 = verts[1].position;
+    let ux = p1.x - p0.x, uy = p1.y - p0.y, uz = p1.z - p0.z;
+    const uLen = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+    ux /= uLen; uy /= uLen; uz /= uLen;
+    // V = normalize(normal × U) — perpendicular to U within the face plane
+    let vx = n.y * uz - n.z * uy;
+    let vy = n.z * ux - n.x * uz;
+    let vz = n.x * uy - n.y * ux;
+    const vLen = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+    vx /= vLen; vy /= vLen; vz /= vLen;
+    const uvScale = 1.0; // 1 texture repeat per meter
+
     // Build triangle geometry (fan triangulation)
     const positions: number[] = [];
     const normals: number[] = [];
+    const uvs: number[] = [];
 
     for (let i = 1; i < verts.length - 1; i++) {
-      positions.push(
-        verts[0].position.x + nx, verts[0].position.y + ny, verts[0].position.z + nz,
-        verts[i].position.x + nx, verts[i].position.y + ny, verts[i].position.z + nz,
-        verts[i + 1].position.x + nx, verts[i + 1].position.y + ny, verts[i + 1].position.z + nz,
-      );
-      normals.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z);
+      const tri = [verts[0], verts[i], verts[i + 1]];
+      for (const v of tri) {
+        positions.push(v.position.x + nx, v.position.y + ny, v.position.z + nz);
+        normals.push(n.x, n.y, n.z);
+        // UV relative to face origin (first vertex)
+        const dx = v.position.x - p0.x;
+        const dy = v.position.y - p0.y;
+        const dz = v.position.z - p0.z;
+        uvs.push(
+          (dx * ux + dy * uy + dz * uz) * uvScale,
+          (dx * vx + dy * vy + dz * vz) * uvScale,
+        );
+      }
     }
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+
+    // Resolve material from MaterialManager
+    const matDef = this.materialManager?.getFaceMaterial(id);
 
     if (this.faceGroups.has(id)) {
-      // Update: replace geometry on existing mesh
+      // Update: replace geometry on existing mesh, sync material
       const group = this.faceGroups.get(id)!;
       group.traverse(child => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
           child.geometry = geometry;
+          if (matDef) this.applyMaterialDef(child.material as THREE.MeshStandardMaterial, matDef);
         }
       });
     } else {
@@ -293,7 +361,9 @@ export class SceneBridge {
       group.userData.entityId = id;
       group.userData.entityType = 'face';
 
-      const mesh = new THREE.Mesh(geometry, this.faceMaterial.clone());
+      const meshMat = this.faceMaterial.clone();
+      if (matDef) this.applyMaterialDef(meshMat, matDef);
+      const mesh = new THREE.Mesh(geometry, meshMat);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       mesh.userData.entityId = id;

@@ -8,15 +8,25 @@ import type {
   IModelDocument, IViewport, IInferenceEngine,
 } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
+import { customAxes } from '../tool.axes/CustomAxes';
 
 /** Named drawing planes that arrow keys cycle through. */
 export type DrawingPlaneAxis = 'ground' | 'red' | 'green' | 'blue';
 
-export const DRAWING_PLANES: Record<DrawingPlaneAxis, { normal: Vec3; label: string; color: string }> = {
-  ground: { normal: { x: 0, y: 1, z: 0 }, label: 'Ground (XZ)', color: '' },
-  red:    { normal: { x: 1, y: 0, z: 0 }, label: 'Red (YZ)',    color: 'red' },
-  green:  { normal: { x: 0, y: 1, z: 0 }, label: 'Green (XZ)',  color: 'green' },
-  blue:   { normal: { x: 0, y: 0, z: 1 }, label: 'Blue (XY)',   color: 'blue' },
+/** Get the plane normal for an axis, respecting custom axes orientation. */
+function getPlaneNormal(axis: DrawingPlaneAxis): Vec3 {
+  return customAxes.getPlaneNormal(axis);
+}
+
+function getPlaneLabelSuffix(): string {
+  return customAxes.isCustom ? ' (custom)' : '';
+}
+
+export const DRAWING_PLANES: Record<DrawingPlaneAxis, { label: string; color: string }> = {
+  ground: { label: 'Ground (XZ)', color: '' },
+  red:    { label: 'Red (YZ)',    color: 'red' },
+  green:  { label: 'Green (XZ)',  color: 'green' },
+  blue:   { label: 'Blue (XY)',   color: 'blue' },
 };
 
 export abstract class BaseTool implements ITool {
@@ -179,8 +189,7 @@ export abstract class BaseTool implements ITool {
    * The plane passes through the anchor point with the axis normal.
    */
   protected getDrawingPlane(anchor: Vec3): Plane {
-    const info = DRAWING_PLANES[this.drawingPlaneAxis];
-    const normal = info.normal;
+    const normal = getPlaneNormal(this.drawingPlaneAxis);
     const distance = vec3.dot(anchor, normal);
     return { normal: { ...normal }, distance };
   }
@@ -212,7 +221,7 @@ export abstract class BaseTool implements ITool {
 
     if (changed) {
       const info = DRAWING_PLANES[this.drawingPlaneAxis];
-      this.setStatus(`Drawing plane: ${info.label}. ${this.statusText.replace(/Drawing plane:.*?\. /, '')}`);
+      this.setStatus(`Drawing plane: ${info.label}${getPlaneLabelSuffix()}. ${this.statusText.replace(/Drawing plane:.*?\. /, '')}`);
     }
     return changed;
   }

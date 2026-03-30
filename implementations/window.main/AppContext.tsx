@@ -39,6 +39,8 @@ interface AppContextValue extends AppState {
   undo: () => void;
   redo: () => void;
   updateState: (partial: Partial<AppState>) => void;
+  syncToolState: () => void;
+  syncPreviews: () => void;
 }
 
 const defaultState: AppState = {
@@ -77,6 +79,8 @@ const AppContext = createContext<AppContextValue>({
   undo: () => {},
   redo: () => {},
   updateState: () => {},
+  syncToolState: () => {},
+  syncPreviews: () => {},
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -217,6 +221,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  /** Sync tool VCB/status + undo state into React. */
+  const syncToolState = useCallback(() => {
+    const app = appRef.current;
+    if (!app) return;
+    const tool = app.toolManager.getActiveTool();
+    setState(prev => ({
+      ...prev,
+      vcbLabel: tool?.getVCBLabel() ?? 'Length',
+      vcbValue: tool?.getVCBValue() ?? '',
+      statusText: tool?.getStatusText() ?? 'Ready',
+      canUndo: app.document.history.canUndo,
+      canRedo: app.document.history.canRedo,
+    }));
+  }, []);
+
+  /** Clear and re-render tool preview geometry (rubber bands, outlines). */
+  const syncPreviews = useCallback(() => {
+    const app = appRef.current;
+    const sb = (app as any)?.sceneBridge;
+    if (!sb) return;
+    const tool = app!.toolManager.getActiveTool();
+    sb.clearPreviewEdges();
+    sb.clearRubberBand();
+    if (tool) {
+      const preview = tool.getPreview();
+      if (preview) {
+        if (preview.polygon && preview.polygon.length >= 2) sb.setPreviewRect(preview.polygon);
+        if (preview.lines) for (const line of preview.lines) sb.setRubberBand(line.from, line.to);
+      }
+    }
+  }, []);
+
   return (
     <AppContext.Provider value={{
       ...state,
@@ -232,6 +268,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       undo,
       redo,
       updateState,
+      syncToolState,
+      syncPreviews,
     }}>
       {children}
     </AppContext.Provider>

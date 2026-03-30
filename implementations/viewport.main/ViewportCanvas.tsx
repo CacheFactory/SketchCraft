@@ -16,7 +16,7 @@ interface TextDialogState {
 export function ViewportCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const appInstanceRef = useRef<Application | null>(null);
-  const { setApp, activateTool, updateState } = useApp();
+  const { setApp, activateTool, updateState, syncPreviews } = useApp();
   const [dragBox, setDragBox] = useState<{ x: number; y: number; w: number; h: number; mode: string } | null>(null);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
 
@@ -39,23 +39,17 @@ export function ViewportCanvas() {
 
     app.syncScene();
     syncSelectionToUI();
+    syncPreviews();
 
     const tool = app.toolManager.getActiveTool();
     if (tool) {
-      // Clear preview if tool returned to idle (action completed)
-      const preview = tool.getPreview();
-      if (!preview && app.sceneBridge) {
-        app.sceneBridge.clearPreviewEdges();
-        app.sceneBridge.clearRubberBand();
-      }
-
       updateState({
         vcbLabel: tool.getVCBLabel(),
         vcbValue: tool.getVCBValue(),
         statusText: tool.getStatusText(),
       });
     }
-  }, [syncSelectionToUI, updateState]);
+  }, [syncSelectionToUI, syncPreviews, updateState]);
 
   // Initialize the Application when the container mounts
   useEffect(() => {
@@ -277,22 +271,7 @@ export function ViewportCanvas() {
     }
 
     // Render live tool preview (rubber-band lines, rectangle outlines, etc.)
-    if (app?.sceneBridge) {
-      const preview = tool.getPreview();
-      app.sceneBridge.clearPreviewEdges();
-      app.sceneBridge.clearRubberBand();
-
-      if (preview) {
-        if (preview.polygon && preview.polygon.length >= 2) {
-          app.sceneBridge.setPreviewRect(preview.polygon);
-        }
-        if (preview.lines) {
-          for (const line of preview.lines) {
-            app.sceneBridge.setRubberBand(line.from, line.to);
-          }
-        }
-      }
-    }
+    syncPreviews();
 
     // Update drag box overlay for Select tool
     if (tool.id === 'tool.select' && (tool as any).getDragBox) {
@@ -312,7 +291,7 @@ export function ViewportCanvas() {
       vcbValue: tool.getVCBValue(),
       statusText: tool.getStatusText(),
     });
-  }, [getToolEvent, syncSelectionToUI, updateState]);
+  }, [getToolEvent, syncSelectionToUI, syncPreviews, updateState]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Middle mouse release

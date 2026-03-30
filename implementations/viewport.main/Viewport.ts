@@ -129,10 +129,22 @@ export class Viewport implements IViewport {
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 
     const raycaster = new THREE.Raycaster();
-    // Scale edge hit threshold with camera distance so edges are equally easy
-    // to select at any zoom level (~15 screen pixels worth of tolerance)
-    const camDist = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
-    const threshold = Math.max(0.1, camDist * 0.02); // ~2% of camera distance
+    // Compute a line threshold that corresponds to a fixed number of screen pixels
+    // regardless of zoom level. We convert ~10 pixels into world units at the
+    // camera's current distance to its look-at target.
+    const camTarget = (this._cameraController as any).target || { x: 0, y: 0, z: 0 };
+    const camDist = camera.position.distanceTo(new THREE.Vector3(camTarget.x, camTarget.y, camTarget.z));
+    let pixelSize: number;
+    if (camera instanceof THREE.PerspectiveCamera) {
+      // World units per pixel at target distance
+      const vFov = (camera.fov * Math.PI) / 180;
+      pixelSize = (2 * camDist * Math.tan(vFov / 2)) / h;
+    } else {
+      // Orthographic: world units per pixel
+      const orthoH = ((camera as THREE.OrthographicCamera).top - (camera as THREE.OrthographicCamera).bottom);
+      pixelSize = orthoH / h;
+    }
+    const threshold = Math.max(0.01, pixelSize * 10); // ~10 screen pixels
     raycaster.params.Line = { threshold };
     raycaster.params.Points = { threshold };
     raycaster.setFromCamera(ndc, camera);

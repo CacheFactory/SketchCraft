@@ -104,17 +104,16 @@ nodes:
 - id: toolbar.main
   kind: toolbar
   layer: ui
-  name: Main Toolbar
+  name: Main Toolbar (Removed)
   x:
     ui:
       framework: React
       position: top
     docs:
-      description: 'Horizontal toolbar at the top of the main window. Contains primary tool buttons: Select, Line, Rectangle,
-        Circle, Arc, Push/Pull, Move, Rotate, Scale, Offset, Eraser, Paint Bucket, Orbit, Pan, Zoom. Each button shows icon
-        + tooltip with keyboard shortcut.'
+      description: 'REMOVED — replaced by native Electron menu bar (menu.main). File/Edit dropdown menus were removed from
+        the renderer. All tools previously here are now in toolbar.drawing.'
     impl:
-      status: implemented
+      status: removed
   uuid: sVgEpC7b
 - id: toolbar.drawing
   kind: toolbar
@@ -125,9 +124,10 @@ nodes:
       framework: React
       position: left
     docs:
-      description: 'Vertical toolbar docked on the left side. Contains drawing and modification tools organized in groups:
-        Drawing (Line, Rectangle, Circle, Arc, Polygon, Freehand), Modification (Push/Pull, Follow Me, Offset, Move, Rotate,
-        Scale), and Construction (Tape Measure, Protractor, Axes).'
+      description: 'Vertical toolbar docked on the left side. Contains ALL tools organized in collapsible groups:
+        Select (Select, Eraser), Draw (Line, Rectangle, Circle, Arc, Polygon), Modify (Push/Pull, Move, Rotate, Scale,
+        Offset, Follow Me, Paint), Measure (Tape Measure, Protractor, Dimension, Text, Section Plane, Axes),
+        Navigate (Orbit, Pan, Zoom). Shows tool icon + label with keyboard shortcut in tooltip.'
     impl:
       status: implemented
   uuid: osvXnUrz
@@ -589,9 +589,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Apply materials/colors to faces. Click a face to apply the current material. Alt+click to sample a material
-        from a face. Shift+click to apply to all faces with the same material. Ctrl+click to apply to all connected faces.
-        Materials support albedo color, texture map, opacity, and PBR properties.
+      description: Apply materials/colors/textures to faces. Click to paint, Shift+click to sample, Alt+click to fill all
+        faces with the same current material. Material selection via ToolSettingsPanel (right sidebar) with swatch grid showing
+        color and procedural texture thumbnails. Supports PBR materials with albedo color, texture map, opacity, roughness,
+        metalness. Paint operations are undoable.
   uuid: 2gnrR81m
 - id: tool.orbit
   kind: tool
@@ -1670,8 +1671,8 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Command-pattern undo/redo system. Each user action is wrapped in a transaction that records the geometry
-        state delta.
+      description: Snapshot-based undo/redo system. Each transaction captures full geometry state plus material face assignments
+        as a binary snapshot. Undo/redo restores both geometry and material assignments atomically.
       notes: "## Typed Interface\n\n```typescript\nimport { MeshDelta } from '../geometry/mesh';\n\nexport interface Transaction\
         \ {\n  readonly id: string;\n  readonly name: string; // human-readable: 'Push/Pull', 'Move', 'Draw Line'\n  readonly\
         \ timestamp: number;\n  readonly deltas: Delta[]; // ordered list of changes\n}\n\nexport type Delta =\n  | { type:\
@@ -2284,7 +2285,10 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Manages material definitions and texture assets. Stores PBR material properties.
+      description: Manages material definitions, procedural texture generation, and face assignments. Stores PBR material properties
+        (color, roughness, metalness, opacity, albedoMap). Includes 11 built-in procedural textures (Brick, Wood, Concrete, Metal,
+        Glass, Stone, Tile, Grass, Asphalt, Plaster, Roof Shingle) generated via canvas at startup. Face assignments are serialized
+        for undo/redo snapshots alongside geometry state.
       notes: "## Typed Interface\n\n```typescript\nimport { Color3, Vector2 } from '../math/types';\n\nexport interface TextureMap\
         \ {\n  filePath: string; // relative path to texture file\n  width: number;\n  height: number;\n  scale: Vector2;\
         \ // UV scale (tiling)\n  offset: Vector2; // UV offset\n  rotation: number; // UV rotation in radians\n  gpuTexture:\
@@ -3015,10 +3019,12 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n          (DoubleSide front + back\
-        \ meshes) in main scene. Edges as THREE.Line with shared material\n          in overlay scene. Component bounding\
-        \ boxes as purple wireframe. Snap system: vertices,\n          midpoints, and edge-edge intersections projected to\
-        \ screen space. Preview lines and snap\n          markers non-raycastable (raycast=()=>{})."
+      description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n          (DoubleSide meshes) in\
+        \ main scene with per-face PBR materials from MaterialManager.\n          Texture mapping uses face-local UV projection\
+        \ (tangent/bitangent from first edge) so\n          textures stick to faces when moved/rotated. Edges as THREE.Line\
+        \ in overlay scene.\n          Component bounding boxes as purple wireframe. Snap system: vertices, midpoints,\n  \
+        \        and edge-edge intersections. Texture cache for data URL → THREE.Texture.\n          Preview lines and snap\
+        \ markers non-raycastable (raycast=()=>{})."
   uuid: sBr1dg3X
 - id: app.singleton
   kind: service
@@ -3098,10 +3104,14 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: "Single window-level keyboard handler in App.tsx. Routes: Cmd+Z→undo,\n          Cmd+Shift+Z→redo, Cmd+S/O/N→file\
-        \ ops, letters→tool activation, arrows→tool onKeyDown\n          (axis lock for Line, plane switch for shapes), Escape/Enter/Delete→tool\
-        \ action. Arrow keys\n          bypass INPUT focus check. Digits auto-focus the VCB input with preventDefault to avoid\n\
-        \          double-insertion. Electron menu has NO accelerators."
+      description: "Single window-level keyboard handler in App.tsx. Shortcut maps are built
+          from DEFAULT_PREFERENCES.shortcuts (single source of truth in ipc-types.ts).
+          Routes: Cmd+Z→undo, Cmd+Shift+Z→redo, Cmd+S/O/N→file ops,
+          letters→tool activation (from preferences), arrows→tool onKeyDown
+          (axis lock for Line, plane switch for shapes), Enter/Delete→tool action.
+          Escape clears selection and switches to Select tool.
+          Arrow keys bypass INPUT focus check. Uses syncToolState() and
+          syncPreviews() helpers from AppContext to avoid duplicated state sync."
   uuid: sKbdRout
 - id: system.components
   kind: service
@@ -3148,9 +3158,10 @@ nodes:
       complexity: simple
       status: implemented
     docs:
-      description: "OBJ text format save/open in Application. exportOBJ() writes vertices (v),\n          faces (f), and edges\
-        \ (l). importOBJ() parses and creates geometry. Toolbar buttons\n          (\U0001F4C4\U0001F4C2\U0001F4BE) and shortcuts\
-        \ (Cmd+N/O/S/Shift+S). Uses Electron IPC for native file dialogs."
+      description: "OBJ text format save/open in Application. exportOBJ() writes vertices (v),
+          faces (f), and edges (l). importOBJ() parses and creates geometry.
+          Native menu bar (File menu) and shortcuts (Cmd+N/O/S/Shift+S).
+          Uses Electron IPC for native file dialogs."
   uuid: sFileIO1
 - id: system.dragselect
   kind: service
@@ -3167,6 +3178,23 @@ nodes:
         within the box. Visual overlay rendered as an HTML div in ViewportCanvas. Cursor changes to pointer when hovering
         over selectable entities.
   uuid: sDrgSel1
+- id: panel.tool_settings
+  kind: panel
+  layer: ui
+  name: Tool Settings Panel
+  x:
+    ui:
+      position: right-sidebar
+      visibility: conditional
+    impl:
+      language: TypeScript
+      complexity: moderate
+      status: implemented
+    docs:
+      description: Right-side panel showing tool-specific settings. Appears when a tool with settings is active (e.g. Paint Bucket).
+        Extensible via toolPanels map keyed by tool ID. Paint tool settings include color picker, material swatch grid with
+        procedural texture thumbnails, add/delete material controls, and active material preview.
+  uuid: sPnlTlSt
 edges:
 - kind: contains
   from: data.scene
@@ -3394,14 +3422,6 @@ edges:
   uuid: sJetwdQx
 - kind: contains
   from: window.main
-  to: toolbar.main
-  layer: ui
-  x:
-    docs:
-      description: Main window contains the main toolbar at the top.
-  uuid: Q6fgAyZc
-- kind: contains
-  from: window.main
   to: toolbar.drawing
   layer: ui
   x:
@@ -3481,32 +3501,32 @@ edges:
       description: Main window contains the measurements/VCB panel at the bottom.
   uuid: opqVDDrd
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.select
   layer: ui
   uuid: sHaG47Wy
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.eraser
   layer: ui
   uuid: XiSpqTYE
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.paint
   layer: ui
   uuid: dAj7q4M4
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.orbit
   layer: ui
   uuid: HabJC52Y
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.pan
   layer: ui
   uuid: cJHW1CGY
 - kind: contains
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.zoom
   layer: ui
   uuid: 8D5hAYNb
@@ -5142,12 +5162,12 @@ edges:
       description: Renderer process contains the material manager.
   uuid: aLkZ6dnx
 - kind: triggers
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.solid_tools
   layer: ui
   x:
     docs:
-      description: Main toolbar triggers the Solid Tools tool.
+      description: Drawing toolbar triggers the Solid Tools tool.
   uuid: PkcUcERF
 - kind: triggers
   from: toolbar.views
@@ -6203,7 +6223,7 @@ edges:
   layer: system
   uuid: q5msYnmu
 - kind: triggers
-  from: toolbar.main
+  from: toolbar.drawing
   to: tool.solid_tools
   layer: ui
   uuid: nvVgarIR
@@ -6806,6 +6826,58 @@ edges:
   to: lib.vitest
   layer: testing
   uuid: 3haau5fb
+# ── Paint tool / Materials / History integration edges ──
+- kind: modifies
+  from: tool.paint
+  to: data.materials
+  layer: interaction
+  x:
+    docs:
+      description: Paint tool applies materials to faces via MaterialManager.applyToFace(). Wraps each paint operation in
+        a history transaction for undo support.
+  uuid: ePntMatM
+- kind: reads
+  from: tool.paint
+  to: data.materials
+  layer: interaction
+  x:
+    docs:
+      description: Paint tool reads material assignments for Shift+click sampling (getFaceMaterial) and checks material existence.
+  uuid: ePntMatR
+- kind: reads
+  from: panel.tool_settings
+  to: data.materials
+  layer: ui
+  x:
+    docs:
+      description: ToolSettingsPanel reads all materials to display swatch grid with color/texture thumbnails.
+  uuid: ePnlMatR
+- kind: contains
+  from: window.main
+  to: panel.tool_settings
+  layer: ui
+  x:
+    docs:
+      description: Tool settings panel is rendered in the right sidebar of the main window layout.
+  uuid: eWnPnlCn
+- kind: manages
+  from: data.history
+  to: data.materials
+  layer: data
+  x:
+    docs:
+      description: History snapshots include serialized material face assignments. Undo/redo restores both geometry and material
+        state atomically via packed binary format.
+  uuid: eHstMatMg
+- kind: reads
+  from: bridge.scene
+  to: data.materials
+  layer: runtime
+  x:
+    docs:
+      description: SceneBridge reads material definitions to apply PBR properties (color, roughness, metalness, opacity) and
+        texture maps to Three.js mesh materials. Uses face-local UV projection for texture mapping.
+  uuid: eSbMatRd
 views:
 - name: User Workflow
   description: End-to-end view from actor through UI to geometry
@@ -6813,8 +6885,8 @@ views:
     nodes:
     - actor.designer
     - window.main
-    - toolbar.main
     - toolbar.drawing
+    - menu.main
     - tool.select
     - tool.line
     - tool.pushpull

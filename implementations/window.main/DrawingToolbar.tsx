@@ -53,6 +53,7 @@ const toolGroups: ToolGroup[] = [
       { id: 'tool.dimension', label: 'Dimension', icon: '↔', shortcut: 'D' },
       { id: 'tool.text', label: 'Text', icon: 'T', shortcut: 'Shift+T' },
       { id: 'tool.section_plane', label: 'Section', icon: '✂', shortcut: 'Shift+S' },
+      { id: 'tool.axes', label: 'Axes', icon: '⊹', shortcut: 'Shift+A' },
     ],
   },
   {

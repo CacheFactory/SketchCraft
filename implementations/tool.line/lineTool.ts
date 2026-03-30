@@ -192,16 +192,13 @@ export class LineTool extends BaseTool {
       let dir: Vec3;
 
       if (this.axisLock) {
-        // Use the locked axis direction
-        switch (this.axisLock) {
-          case 'x': dir = { x: 1, y: 0, z: 0 }; break;
-          case 'y': dir = { x: 0, y: 1, z: 0 }; break;
-          case 'z': dir = { x: 0, y: 0, z: 1 }; break;
-        }
+        // Use the locked axis direction (respects custom axes)
+        const { customAxes } = require('../tool.axes/CustomAxes');
+        dir = customAxes.getAxisDirection(this.axisLock);
         // Use the sign from currentPoint to determine positive/negative direction
         if (this.currentPoint) {
           const delta = vec3.sub(this.currentPoint, lastPoint);
-          const component = this.axisLock === 'x' ? delta.x : this.axisLock === 'y' ? delta.y : delta.z;
+          const component = vec3.dot(delta, dir);
           if (component < 0) dir = vec3.negate(dir);
         }
       } else if (this.currentPoint) {
@@ -262,9 +259,8 @@ export class LineTool extends BaseTool {
    * Returns the closest point on the axis to the ray.
    */
   private projectRayOntoAxis(ray: { origin: Vec3; direction: Vec3 }, anchor: Vec3, axis: 'x' | 'y' | 'z'): Vec3 {
-    const axisDir: Vec3 = axis === 'x' ? { x: 1, y: 0, z: 0 } :
-                          axis === 'y' ? { x: 0, y: 1, z: 0 } :
-                                         { x: 0, y: 0, z: 1 };
+    const { customAxes } = require('../tool.axes/CustomAxes');
+    const axisDir: Vec3 = customAxes.getAxisDirection(axis);
 
     // Closest point between two lines: ray and axis line through anchor
     const w = vec3.sub(anchor, ray.origin);

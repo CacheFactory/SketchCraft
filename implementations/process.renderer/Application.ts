@@ -64,6 +64,7 @@ export class Application implements IApplication {
     const vp = this.viewport as Viewport;
     this.sceneBridge = new SceneBridge(geometryEngine, vp.getWebGLRenderer());
     this.sceneBridge.setSceneManager(this.document.scene as any);
+    this.sceneBridge.setMaterialManager(this.document.materials);
 
     // 4. Initialize inference engine
     this.inference = new InferenceEngine();

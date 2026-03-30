@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid';
 import { SimpleEventEmitter } from '../../src/core/events';
 import { MaterialDef } from '../../src/core/types';
 import { IMaterialManager, IGeometryEngine } from '../../src/core/interfaces';
+import { generateBuiltinMaterials } from './ProceduralTextures';
 
 // ─── Event map ───────────────────────────────────────────────────
 
@@ -44,6 +45,27 @@ export class MaterialManager implements IMaterialManager {
     this.materials = new Map();
     this.materials.set(this.defaultMaterial.id, this.defaultMaterial);
     this.geometryEngine = geometryEngine ?? null;
+    this.loadBuiltinMaterials();
+  }
+
+  private loadBuiltinMaterials(): void {
+    try {
+      const builtins = generateBuiltinMaterials();
+      for (const b of builtins) {
+        const mat: MaterialDef = {
+          id: uuid(),
+          name: b.name,
+          color: b.color,
+          opacity: b.opacity,
+          roughness: b.roughness,
+          metalness: b.metalness,
+          albedoMap: b.albedoMap,
+        };
+        this.materials.set(mat.id, mat);
+      }
+    } catch (e) {
+      console.error('Failed to load builtin materials:', e);
+    }
   }
 
   // ── CRUD ─────────────────────────────────────────────────────
@@ -132,6 +154,25 @@ export class MaterialManager implements IMaterialManager {
     return this.materials.get(assignment.front) ?? this.defaultMaterial;
   }
 
+  // ── Snapshot (for undo/redo) ─────────────────────────────────
+
+  serializeAssignments(): string {
+    const obj: Record<string, { front: string; back: string }> = {};
+    for (const [faceId, a] of this.faceAssignments) {
+      obj[faceId] = { front: a.front, back: a.back };
+    }
+    return JSON.stringify(obj);
+  }
+
+  deserializeAssignments(data: string): void {
+    this.faceAssignments.clear();
+    const obj = JSON.parse(data) as Record<string, { front: string; back: string }>;
+    for (const [faceId, a] of Object.entries(obj)) {
+      this.faceAssignments.set(faceId, { front: a.front, back: a.back });
+    }
+    this.emitter.emit('changed');
+  }
+
   // ── Reset ────────────────────────────────────────────────────
 
   reset(): void {
@@ -139,6 +180,7 @@ export class MaterialManager implements IMaterialManager {
     this.faceAssignments.clear();
     this.defaultMaterial = createDefaultMaterial();
     this.materials.set(this.defaultMaterial.id, this.defaultMaterial);
+    this.loadBuiltinMaterials();
     this.emitter.emit('changed');
   }
 

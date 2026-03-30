@@ -1,7 +1,6 @@
 // @archigraph window.main
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { AppProvider, useApp } from './AppContext';
-import { MainToolbar } from './MainToolbar';
 import { DrawingToolbar } from './DrawingToolbar';
 import { ViewsToolbar } from './ViewsToolbar';
 import { EntityInfoPanel } from './EntityInfoPanel';
@@ -9,7 +8,9 @@ import { OutlinerPanel } from './OutlinerPanel';
 import { LayersPanel } from './LayersPanel';
 import { MeasurementsBar } from './MeasurementsBar';
 import { ContextMenu } from './ContextMenu';
+import { ToolSettingsPanel } from './ToolSettingsPanel';
 import { ViewportCanvas } from '../viewport.main/ViewportCanvas';
+import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 
 export function App() {
   return (
@@ -19,13 +20,25 @@ export function App() {
   );
 }
 
+// Build shortcut lookup tables from preferences (key -> toolId)
+const shortcutMap: Record<string, string> = {};
+const shiftShortcutMap: Record<string, string> = {};
+
+for (const [toolId, binding] of Object.entries(DEFAULT_PREFERENCES.shortcuts)) {
+  if (!toolId.startsWith('tool.')) continue;
+  if (binding.startsWith('Shift+')) {
+    shiftShortcutMap[binding.slice(6).toLowerCase()] = toolId;
+  } else {
+    shortcutMap[binding === 'Space' ? ' ' : binding.toLowerCase()] = toolId;
+  }
+}
+
 function AppLayout() {
-  const { theme, app, activateTool, undo, redo, setRenderMode, updateState } = useApp();
+  const { theme, app, activateTool, undo, redo, updateState, syncToolState, syncPreviews } = useApp();
 
   // Handle keyboard shortcuts globally
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Arrow keys always go to tools, even from input fields
       const isArrow = e.key.startsWith('Arrow');
 
       // Don't handle tool shortcuts if focused on input/select or inside a dialog
@@ -39,92 +52,87 @@ function AppLayout() {
       if (isMeta && e.key === 'z' && e.shiftKey) { e.preventDefault(); redo(); return; }
 
       // File operations
-      const appInst = (window as any).__debugApp;
-      if (isMeta && e.key === 's' && !e.shiftKey) { e.preventDefault(); appInst?.saveDocument(); return; }
-      if (isMeta && e.key === 's' && e.shiftKey) { e.preventDefault(); appInst?.saveDocumentAs(); return; }
-      if (isMeta && e.key === 'o') { e.preventDefault(); appInst?.openDocument(); return; }
-      if (isMeta && e.key === 'n') { e.preventDefault(); appInst?.newDocument(); return; }
+      if (isMeta && e.key === 's' && !e.shiftKey) { e.preventDefault(); (app as any)?.saveDocument(); return; }
+      if (isMeta && e.key === 's' && e.shiftKey) { e.preventDefault(); (app as any)?.saveDocumentAs(); return; }
+      if (isMeta && e.key === 'o') { e.preventDefault(); (app as any)?.openDocument(); return; }
+      if (isMeta && e.key === 'n') { e.preventDefault(); (app as any)?.newDocument(); return; }
 
-      // Tool shortcuts
-      const shortcuts: Record<string, string> = {
-        ' ': 'tool.select', l: 'tool.line', r: 'tool.rectangle',
-        c: 'tool.circle', a: 'tool.arc', p: 'tool.pushpull',
-        m: 'tool.move', q: 'tool.rotate', s: 'tool.scale',
-        f: 'tool.offset', e: 'tool.eraser', b: 'tool.paint',
-        o: 'tool.orbit', h: 'tool.pan', z: 'tool.zoom',
-        t: 'tool.tape_measure', d: 'tool.dimension', g: 'tool.polygon',
-      };
-
+      // Tool shortcuts (from preferences)
       const key = e.key.toLowerCase();
-      if (!isMeta && shortcuts[key]) {
+      if (!isMeta && !e.shiftKey && shortcutMap[key]) {
         e.preventDefault();
-        activateTool(shortcuts[key]);
+        activateTool(shortcutMap[key]);
+        return;
+      }
+      if (!isMeta && e.shiftKey && shiftShortcutMap[key]) {
+        e.preventDefault();
+        activateTool(shiftShortcutMap[key]);
         return;
       }
 
-      // Arrow keys + Escape + Enter: forward to active tool
-      if (e.key.startsWith('Arrow') || e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace') {
+      // Escape: clear selection and deactivate tool
+      if (e.key === 'Escape') {
         e.preventDefault();
-        const appInst = (window as any).__debugApp;
-        if (appInst) {
-          const tool = appInst.toolManager.getActiveTool();
-          if (tool) {
-            tool.onKeyDown({
-              key: e.key, code: e.code,
-              shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey, altKey: e.altKey,
-            });
-            appInst.syncScene();
-            appInst.syncSelection();
-            if (appInst.sceneBridge) {
-              const preview = tool.getPreview();
-              appInst.sceneBridge.clearPreviewEdges();
-              appInst.sceneBridge.clearRubberBand();
-              if (preview) {
-                if (preview.polygon && preview.polygon.length >= 2) appInst.sceneBridge.setPreviewRect(preview.polygon);
-                if (preview.lines) for (const line of preview.lines) appInst.sceneBridge.setRubberBand(line.from, line.to);
-              }
-            }
-            updateState({
-              vcbLabel: tool.getVCBLabel(),
-              vcbValue: tool.getVCBValue(),
-              statusText: tool.getStatusText(),
-              canUndo: appInst.document.history.canUndo,
-              canRedo: appInst.document.history.canRedo,
-            });
-          }
+        // Let active tool cancel in-progress operation
+        const tool = (app as any)?.toolManager?.getActiveTool();
+        if (tool) {
+          tool.onKeyDown({
+            key: e.key, code: e.code,
+            shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey, altKey: e.altKey,
+          });
+        }
+        (app as any)?.document?.selection?.clear();
+        activateTool('tool.select');
+        (app as any)?.syncScene?.();
+        (app as any)?.syncSelection?.();
+        syncPreviews();
+        syncToolState();
+        return;
+      }
+
+      // Arrow keys + Enter + Delete: forward to active tool
+      if (isArrow || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        const tool = (app as any)?.toolManager?.getActiveTool();
+        if (tool) {
+          tool.onKeyDown({
+            key: e.key, code: e.code,
+            shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey, altKey: e.altKey,
+          });
+          (app as any)?.syncScene?.();
+          (app as any)?.syncSelection?.();
+          syncPreviews();
+          syncToolState();
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activateTool, undo, redo]);
+  }, [app, activateTool, undo, redo, syncToolState, syncPreviews]);
 
   // Listen for menu actions from main process
   useEffect(() => {
     if (typeof window.api === 'undefined') return;
 
     const cleanup = window.api.on('menu:action', ({ action }) => {
-      // Undo/redo
       if (action === 'undo') { undo(); return; }
       if (action === 'redo') { redo(); return; }
 
       // Tool activation from menu
       if (typeof action === 'string' && action.startsWith('tool-')) {
-        const toolId = 'tool.' + action.slice(5); // 'tool-line' -> 'tool.line'
-        activateTool(toolId);
+        activateTool('tool.' + action.slice(5));
         return;
       }
 
-      // Other menu actions
       switch (action) {
-        case 'delete':
-          // Forward delete to active tool's keydown
-          const tool = app?.toolManager?.getActiveTool();
+        case 'delete': {
+          const tool = (app as any)?.toolManager?.getActiveTool();
           if (tool) tool.onKeyDown({ key: 'Delete', code: 'Delete', shiftKey: false, ctrlKey: false, altKey: false });
           break;
+        }
         case 'select-all':
-          app?.document?.selection?.selectAll();
+          (app as any)?.document?.selection?.selectAll();
           break;
       }
     });
@@ -135,7 +143,6 @@ function AppLayout() {
   return (
     <div className="app-layout" data-theme={theme}>
       <div className="app-top-bar">
-        <MainToolbar />
         <ViewsToolbar />
       </div>
       <div className="app-main">
@@ -144,6 +151,7 @@ function AppLayout() {
           <ViewportCanvas />
         </div>
         <div className="app-right-panels">
+          <ToolSettingsPanel />
           <EntityInfoPanel />
           <OutlinerPanel />
           <LayersPanel />

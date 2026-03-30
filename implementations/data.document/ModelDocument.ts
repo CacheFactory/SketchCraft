@@ -65,10 +65,32 @@ export class ModelDocument implements IModelDocument {
     this.history = new HistoryManager();
     this.materials = new MaterialManager(this.geometry);
 
-    // Wire up snapshot-based undo/redo
+    // Wire up snapshot-based undo/redo — captures geometry + material assignments
     (this.history as HistoryManager).setSnapshotCallbacks(
-      () => this.geometry.serialize(),
-      (data: ArrayBuffer) => this.geometry.deserialize(data),
+      () => {
+        const geoBuf = this.geometry.serialize();
+        const matJson = (this.materials as MaterialManager).serializeAssignments();
+        const matBytes = new TextEncoder().encode(matJson);
+        // Pack: [4 bytes geoLen][geoBuf][matBytes]
+        const total = 4 + geoBuf.byteLength + matBytes.byteLength;
+        const out = new ArrayBuffer(total);
+        const view = new DataView(out);
+        view.setUint32(0, geoBuf.byteLength, true);
+        new Uint8Array(out, 4, geoBuf.byteLength).set(new Uint8Array(geoBuf));
+        new Uint8Array(out, 4 + geoBuf.byteLength).set(matBytes);
+        return out;
+      },
+      (data: ArrayBuffer) => {
+        const view = new DataView(data);
+        const geoLen = view.getUint32(0, true);
+        const geoBuf = data.slice(4, 4 + geoLen);
+        const matBytes = new Uint8Array(data, 4 + geoLen);
+        this.geometry.deserialize(geoBuf);
+        if (matBytes.byteLength > 0) {
+          const matJson = new TextDecoder().decode(matBytes);
+          (this.materials as MaterialManager).deserializeAssignments(matJson);
+        }
+      },
     );
 
     this.wireEvents();

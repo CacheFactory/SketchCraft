@@ -12,7 +12,7 @@ export class PaintTool extends BaseTool {
   readonly category = 'modify' as const;
   readonly cursor = 'pointer';
 
-  private activeMaterialId: string | null = null;
+  activeMaterialId: string | null = null;
 
   activate(): void {
     super.activate();

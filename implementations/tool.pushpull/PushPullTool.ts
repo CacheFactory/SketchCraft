@@ -48,9 +48,10 @@ export class PushPullTool extends BaseTool {
     if (event.button !== 0) return;
 
     if (this.phase === 'idle') {
-      // Use pre-computed raycast hit from the event
-      if (event.hitEntityId) {
-        const face = this.document.geometry.getFace(event.hitEntityId);
+      // Look for a face in the raycast results — the first hit may be an edge
+      const hits = this.viewport.raycastScene(event.screenX, event.screenY);
+      for (const hit of hits) {
+        const face = this.document.geometry.getFace(hit.entityId);
         if (face) {
           this.startOnFace(face, event.screenY);
           this.setStatus('Move mouse up/down to set distance, then click to commit.');
