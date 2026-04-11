@@ -8,7 +8,12 @@ A free, open-source 3D modeling application inspired by SketchUp, built with Ele
 
 https://github.com/user-attachments/assets/daa8530d-d3b9-4830-90af-bb2e815e5ce2
 
+## Download
 
+Signed and notarized macOS builds:
+
+- **[Apple Silicon (M1/M2/M3/M4)](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/sketchcraft/SketchCraft-1.0.0-arm64.dmg)** — 96 MB
+- **[Intel Mac](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/sketchcraft/SketchCraft-1.0.0.dmg)** — 102 MB
 
 ## Features
 
