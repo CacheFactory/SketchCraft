@@ -143,6 +143,134 @@ export class SceneBridge {
     }
   }
 
+  /**
+   * Batched sync for large imports: merges ALL faces into a single BufferGeometry
+   * and ALL edges into a single LineSegments, avoiding per-face overhead.
+   * Returns the number of faces synced.
+   */
+  syncBatched(): number {
+    const mesh = this.engine.getMesh();
+    const faceCount = mesh.faces.size;
+    const edgeCount = mesh.edges.size;
+
+    console.log(`[syncBatched] Starting: ${faceCount} faces, ${edgeCount} edges`);
+
+    // Remove any existing individual face/edge objects first
+    for (const [id, group] of this.faceGroups) {
+      this.scene.remove(group);
+      group.traverse(child => {
+        if (child instanceof THREE.Mesh) child.geometry.dispose();
+      });
+      this.webglRenderer.unregisterEntityObject(id);
+    }
+    this.faceGroups.clear();
+
+    for (const [id, line] of this.edgeLines) {
+      this.overlayScene.remove(line);
+      line.geometry.dispose();
+      this.webglRenderer.unregisterEntityObject(id);
+    }
+    this.edgeLines.clear();
+
+    // Remove previous batched mesh if any
+    const oldBatch = this.scene.getObjectByName('batched-faces');
+    if (oldBatch) {
+      this.scene.remove(oldBatch);
+      oldBatch.traverse(child => {
+        if (child instanceof THREE.Mesh) child.geometry.dispose();
+      });
+    }
+    const oldEdgeBatch = this.overlayScene.getObjectByName('batched-edges');
+    if (oldEdgeBatch) {
+      this.overlayScene.remove(oldEdgeBatch);
+      if (oldEdgeBatch instanceof THREE.LineSegments) oldEdgeBatch.geometry.dispose();
+    }
+
+    // --- Batch all faces into one merged BufferGeometry ---
+    // First pass: count total triangles to pre-allocate
+    let totalTriangles = 0;
+    mesh.faces.forEach((face) => {
+      const vertCount = face.vertexIds.length;
+      if (vertCount >= 3) totalTriangles += vertCount - 2;
+    });
+
+    const posArr = new Float32Array(totalTriangles * 3 * 3);
+    const normArr = new Float32Array(totalTriangles * 3 * 3);
+    let triOffset = 0;
+
+    mesh.faces.forEach((face, id) => {
+      const verts = this.engine.getFaceVertices(id);
+      if (verts.length < 3) return;
+
+      const n = face.normal;
+
+      // Fan triangulation
+      for (let i = 1; i < verts.length - 1; i++) {
+        const tri = [verts[0], verts[i], verts[i + 1]];
+        for (const v of tri) {
+          const base = triOffset * 3;
+          posArr[base] = v.position.x;
+          posArr[base + 1] = v.position.y;
+          posArr[base + 2] = v.position.z;
+          normArr[base] = n.x;
+          normArr[base + 1] = n.y;
+          normArr[base + 2] = n.z;
+          triOffset++;
+        }
+      }
+
+      // Auto-assign to active layer
+      if (this.sceneManager && !this.sceneManager.geometryLayerMap.has(id)) {
+        this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
+      }
+    });
+
+    console.log(`[syncBatched] Built ${totalTriangles} triangles`);
+
+    const batchGeo = new THREE.BufferGeometry();
+    batchGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    batchGeo.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+
+    const batchMat = this.faceMaterial.clone();
+    const batchMesh = new THREE.Mesh(batchGeo, batchMat);
+    batchMesh.name = 'batched-faces';
+    batchMesh.castShadow = true;
+    batchMesh.receiveShadow = false;
+    this.scene.add(batchMesh);
+
+    // --- Batch all edges into one LineSegments ---
+    const edgePositions = new Float32Array(edgeCount * 2 * 3);
+    let edgeOffset = 0;
+
+    mesh.edges.forEach((edge, id) => {
+      const v1 = this.engine.getVertex(edge.startVertexId);
+      const v2 = this.engine.getVertex(edge.endVertexId);
+      if (!v1 || !v2) return;
+
+      const base = edgeOffset * 3;
+      edgePositions[base] = v1.position.x;
+      edgePositions[base + 1] = v1.position.y;
+      edgePositions[base + 2] = v1.position.z;
+      edgePositions[base + 3] = v2.position.x;
+      edgePositions[base + 4] = v2.position.y;
+      edgePositions[base + 5] = v2.position.z;
+      edgeOffset += 2;
+
+      if (this.sceneManager && !this.sceneManager.geometryLayerMap.has(id)) {
+        this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
+      }
+    });
+
+    const edgeGeo = new THREE.BufferGeometry();
+    edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePositions.subarray(0, edgeOffset * 3), 3));
+    const edgeBatch = new THREE.LineSegments(edgeGeo, this.edgeMaterial);
+    edgeBatch.name = 'batched-edges';
+    this.overlayScene.add(edgeBatch);
+
+    console.log(`[syncBatched] Done: ${totalTriangles} triangles, ${edgeOffset / 2} edges`);
+    return faceCount;
+  }
+
   /** Full sync: rebuild Three.js scene from geometry engine state. */
   sync(): void {
     const mesh = this.engine.getMesh();

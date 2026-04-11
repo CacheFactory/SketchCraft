@@ -82,6 +82,7 @@ export interface IGeometryEngine {
   raycast(ray: Ray): Array<{ entityId: string; point: Vec3; distance: number; type: 'vertex' | 'edge' | 'face' }>;
   getBoundingBox(): BoundingBox;
   getMesh(): IMesh;
+  bulkImport(vertices: Vec3[], faces: number[][], standaloneEdges?: [number, number][]): string[];
   clone(): IGeometryEngine;
   serialize(): ArrayBuffer;
   deserialize(data: ArrayBuffer): void;

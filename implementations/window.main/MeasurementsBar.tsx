@@ -28,7 +28,8 @@ export function MeasurementsBar() {
   // Focus VCB when typing numbers globally
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (/^[0-9.,\-]$/.test(e.key) && inputRef.current) {
         e.preventDefault(); // Prevent the browser from also inserting the character
         inputRef.current.focus();

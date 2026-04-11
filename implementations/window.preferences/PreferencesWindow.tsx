@@ -7,7 +7,7 @@ interface PreferencesWindowProps {
   onClose: () => void;
 }
 
-type TabId = 'units' | 'rendering' | 'shortcuts' | 'workflow' | 'plugins';
+type TabId = 'units' | 'rendering' | 'shortcuts' | 'workflow' | 'ai' | 'plugins';
 
 export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
@@ -40,6 +40,7 @@ export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) 
     { id: 'rendering', label: 'Rendering' },
     { id: 'workflow', label: 'Workflow' },
     { id: 'shortcuts', label: 'Shortcuts' },
+    { id: 'ai', label: 'AI' },
     { id: 'plugins', label: 'Plugins' },
   ];
 
@@ -66,13 +67,36 @@ export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) 
             {activeTab === 'units' && (
               <div className="prefs-section">
                 <label className="pref-row">
+                  <span>Unit System</span>
+                  <select value={prefs.unitSystem} onChange={e => {
+                    const sys = e.target.value as 'metric' | 'imperial';
+                    updatePref('unitSystem', sys);
+                    // Auto-switch default unit when system changes
+                    if (sys === 'metric' && (prefs.units === 'inches' || prefs.units === 'feet')) {
+                      updatePref('units', 'm');
+                    } else if (sys === 'imperial' && (prefs.units === 'mm' || prefs.units === 'cm' || prefs.units === 'm')) {
+                      updatePref('units', 'feet');
+                    }
+                  }}>
+                    <option value="metric">Metric</option>
+                    <option value="imperial">Imperial</option>
+                  </select>
+                </label>
+                <label className="pref-row">
                   <span>Default Units</span>
                   <select value={prefs.units} onChange={e => updatePref('units', e.target.value as UserPreferences['units'])}>
-                    <option value="mm">Millimeters</option>
-                    <option value="cm">Centimeters</option>
-                    <option value="m">Meters</option>
-                    <option value="inches">Inches</option>
-                    <option value="feet">Feet</option>
+                    {prefs.unitSystem === 'metric' ? (
+                      <>
+                        <option value="mm">Millimeters</option>
+                        <option value="cm">Centimeters</option>
+                        <option value="m">Meters</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="inches">Inches</option>
+                        <option value="feet">Feet</option>
+                      </>
+                    )}
                   </select>
                 </label>
                 <label className="pref-row">
@@ -123,6 +147,25 @@ export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) 
                     <input type="text" value={key} readOnly style={{ width: 80, textAlign: 'center' }} />
                   </div>
                 ))}
+              </div>
+            )}
+            {activeTab === 'ai' && (
+              <div className="prefs-section">
+                <label className="pref-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                  <span>Anthropic API Key</span>
+                  <input
+                    type="password"
+                    value={prefs.anthropicApiKey}
+                    onChange={e => updatePref('anthropicApiKey', e.target.value)}
+                    placeholder="sk-ant-..."
+                    style={{ width: '100%', height: 28, fontFamily: 'monospace', fontSize: 12 }}
+                  />
+                </label>
+                <p style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+                  Required for the AI chat assistant. Get your key from{' '}
+                  <span style={{ color: 'var(--accent)' }}>console.anthropic.com</span>.
+                  The key is stored locally in your preferences file and never sent anywhere except the Anthropic API.
+                </p>
               </div>
             )}
             {activeTab === 'plugins' && (

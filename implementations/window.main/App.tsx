@@ -1,5 +1,5 @@
 // @archigraph window.main
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { AppProvider, useApp } from './AppContext';
 import { DrawingToolbar } from './DrawingToolbar';
 import { ViewsToolbar } from './ViewsToolbar';
@@ -10,6 +10,8 @@ import { MeasurementsBar } from './MeasurementsBar';
 import { ContextMenu } from './ContextMenu';
 import { ToolSettingsPanel } from './ToolSettingsPanel';
 import { ViewportCanvas } from '../viewport.main/ViewportCanvas';
+import { AIChatPanel } from '../ai.chat/AIChatPanel';
+import { PreferencesWindow } from '../window.preferences/PreferencesWindow';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 
 export function App() {
@@ -35,6 +37,7 @@ for (const [toolId, binding] of Object.entries(DEFAULT_PREFERENCES.shortcuts)) {
 
 function AppLayout() {
   const { theme, app, activateTool, undo, redo, updateState, syncToolState, syncPreviews } = useApp();
+  const [prefsVisible, setPrefsVisible] = useState(false);
 
   // Handle keyboard shortcuts globally
   useEffect(() => {
@@ -126,6 +129,9 @@ function AppLayout() {
       }
 
       switch (action) {
+        case 'preferences':
+          setPrefsVisible(true);
+          break;
         case 'delete': {
           const tool = (app as any)?.toolManager?.getActiveTool();
           if (tool) tool.onKeyDown({ key: 'Delete', code: 'Delete', shiftKey: false, ctrlKey: false, altKey: false });
@@ -159,6 +165,9 @@ function AppLayout() {
       </div>
       <MeasurementsBar />
       <ContextMenu />
+      <LoadingOverlay />
+      <AIChatPanel />
+      <PreferencesWindow visible={prefsVisible} onClose={() => setPrefsVisible(false)} />
 
       <style>{`
         .app-layout {
@@ -194,6 +203,90 @@ function AppLayout() {
           overflow-y: auto;
           background: var(--bg-secondary);
           resize: horizontal;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ─── Loading Overlay ──────────────────────────────────────────────
+
+function LoadingOverlay() {
+  const [loading, setLoading] = useState<{ message: string; progress: number } | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.done) {
+        setLoading(null);
+      } else {
+        setLoading({ message: detail.message || 'Loading...', progress: detail.progress ?? -1 });
+      }
+    };
+    window.addEventListener('import-progress', handler);
+    return () => window.removeEventListener('import-progress', handler);
+  }, []);
+
+  if (!loading) return null;
+
+  const hasProgress = loading.progress >= 0 && loading.progress <= 1;
+
+  return (
+    <div className="loading-overlay">
+      <div className="loading-dialog">
+        <div className="loading-spinner" />
+        <div className="loading-message">{loading.message}</div>
+        <div className="loading-bar-track">
+          {hasProgress
+            ? <div className="loading-bar-fill" style={{ width: `${Math.round(loading.progress * 100)}%` }} />
+            : <div className="loading-bar-indeterminate" />
+          }
+        </div>
+        {hasProgress && (
+          <div className="loading-percent">{Math.round(loading.progress * 100)}%</div>
+        )}
+      </div>
+      <style>{`
+        .loading-overlay {
+          position: fixed; inset: 0; z-index: 10000;
+          background: rgba(0,0,0,0.5); display: flex;
+          align-items: center; justify-content: center;
+        }
+        .loading-dialog {
+          background: var(--bg-secondary, #2a2a2a); border-radius: 8px;
+          padding: 24px 32px; min-width: 300px; text-align: center;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .loading-spinner {
+          width: 32px; height: 32px; margin: 0 auto 12px;
+          border: 3px solid var(--border-color, #555);
+          border-top-color: var(--accent, #4488ff);
+          border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-message {
+          font-size: 13px; color: var(--text-primary, #eee);
+          margin-bottom: 12px; font-weight: 500;
+        }
+        .loading-bar-track {
+          height: 6px; background: var(--bg-tertiary, #333);
+          border-radius: 3px; overflow: hidden;
+        }
+        .loading-bar-fill {
+          height: 100%; background: var(--accent, #4488ff);
+          border-radius: 3px; transition: width 0.2s ease;
+        }
+        .loading-bar-indeterminate {
+          height: 100%; width: 40%; background: var(--accent, #4488ff);
+          border-radius: 3px; animation: indeterminate 1.2s ease-in-out infinite;
+        }
+        @keyframes indeterminate {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(350%); }
+        }
+        .loading-percent {
+          font-size: 11px; color: var(--text-muted, #888);
+          margin-top: 6px;
         }
       `}</style>
     </div>

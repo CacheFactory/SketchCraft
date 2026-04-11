@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execFile } from 'child_process';
+import * as https from 'https';
 import {
   UserPreferences,
   DEFAULT_PREFERENCES,
@@ -260,7 +261,7 @@ function registerIpcHandlers(): void {
     const tmpObj = path.join(os.tmpdir(), `skp-${Date.now()}.obj`);
 
     return new Promise<{ data: ArrayBuffer; filePath: string } | null>((resolve) => {
-      execFile(toolPath, [args.filePath, tmpObj], { timeout: 30000 }, (err, _stdout, stderr) => {
+      execFile(toolPath, [args.filePath, tmpObj], { timeout: 300000, maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {
         if (err) {
           console.error('[skp2obj] conversion failed:', stderr || err.message);
           resolve(null);
@@ -268,7 +269,10 @@ function registerIpcHandlers(): void {
         }
         console.log('[skp2obj]', stderr.trim());
         try {
+          const stat = fs.statSync(tmpObj);
+          console.log(`[skp2obj] OBJ file size: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
           const objData = fs.readFileSync(tmpObj);
+          console.log(`[skp2obj] Read into buffer, sending to renderer...`);
           fs.unlinkSync(tmpObj);
           resolve({
             data: objData.buffer.slice(objData.byteOffset, objData.byteOffset + objData.byteLength),
@@ -351,6 +355,63 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('app:quit', async () => {
     app.quit();
+  });
+
+  // -- AI Chat ---------------------------------------------------------------
+
+  // @archigraph ai.chat
+  ipcMain.handle('ai:chat', async (_event, args: {
+    messages: Array<{ role: string; content: unknown }>;
+    tools: unknown[];
+    system: string;
+  }) => {
+    const apiKey = preferences.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return { error: 'Anthropic API key not set. Go to Preferences > AI to enter your key.' };
+    }
+
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      system: args.system,
+      messages: args.messages,
+      tools: args.tools,
+    });
+
+    return new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              resolve({ error: parsed.error.message || JSON.stringify(parsed.error) });
+            } else {
+              resolve(parsed);
+            }
+          } catch {
+            resolve({ error: `Failed to parse API response: ${data.slice(0, 200)}` });
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        resolve({ error: `API request failed: ${err.message}` });
+      });
+
+      req.write(body);
+      req.end();
+    });
   });
 }
 
@@ -482,18 +543,9 @@ function rebuildMenu(): void {
           click: () => sendMenuAction('redo'),
         },
         { type: 'separator' },
-        {
-          label: 'Cut',
-          click: () => sendMenuAction('cut'),
-        },
-        {
-          label: 'Copy',
-          click: () => sendMenuAction('copy'),
-        },
-        {
-          label: 'Paste',
-          click: () => sendMenuAction('paste'),
-        },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
         {
           label: 'Delete',
           click: () => sendMenuAction('delete'),
@@ -672,6 +724,9 @@ app.on('before-quit', (event) => {
   }
 });
 
+// Increase renderer V8 heap limit for large models
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192');
+
 app.whenReady().then(() => {
   // 1. Load preferences
   preferences = loadPreferences();
@@ -682,6 +737,14 @@ app.whenReady().then(() => {
 
   // 3. Create the main window
   mainWindow = createMainWindow();
+
+  // Monitor for renderer crashes
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[CRASH] Renderer process gone: reason=${details.reason}, exitCode=${details.exitCode}`);
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    console.error('[CRASH] Renderer process became unresponsive');
+  });
 
   // 4. Build application menu
   rebuildMenu();

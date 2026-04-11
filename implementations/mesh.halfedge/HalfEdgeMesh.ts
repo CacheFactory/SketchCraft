@@ -668,4 +668,87 @@ export class HalfEdgeMesh {
 
     return mesh;
   }
+
+  // ─── Bulk import (fast path) ──────────────────────────────────
+
+  /**
+   * Fast bulk add for large model import. Uses numeric counter IDs instead of
+   * UUIDs and skips half-edge topology entirely. Returns vertex ID array
+   * matching the input order.
+   */
+  bulkAdd(
+    positions: Array<{ x: number; y: number; z: number }>,
+    faceIndices: number[][],
+    edgePairs: [number, number][], // pre-deduped [vertexIdx1, vertexIdx2] pairs
+  ): string[] {
+    let counter = this.vertices.size + this.edges.size + this.faces.size;
+
+    // 1. Vertices — simple numeric IDs, inline position (no clone)
+    const vertexIds: string[] = new Array(positions.length);
+    for (let i = 0; i < positions.length; i++) {
+      const id = `v${counter++}`;
+      this.vertices.set(id, {
+        id,
+        position: { x: positions[i].x, y: positions[i].y, z: positions[i].z },
+        selected: false,
+        hidden: false,
+      });
+      this.vertexToHalfEdges.set(id, new Set());
+      vertexIds[i] = id;
+    }
+
+    // 2. Edges from pre-deduped pairs (vertex indices → resolved IDs)
+    for (let i = 0; i < edgePairs.length; i++) {
+      const id = `e${counter++}`;
+      this.edges.set(id, {
+        id,
+        startVertexId: vertexIds[edgePairs[i][0]],
+        endVertexId: vertexIds[edgePairs[i][1]],
+        soft: false,
+        smooth: false,
+        selected: false,
+        hidden: false,
+        materialIndex: -1,
+      });
+      this.edgeToHalfEdges.set(id, []);
+    }
+
+    // 3. Faces — compute normals via Newell's method, skip half-edges
+    for (const indices of faceIndices) {
+      const n = indices.length;
+      const vIds = new Array(n);
+      let nx = 0, ny = 0, nz = 0;
+
+      // Resolve IDs and fetch positions in one pass
+      for (let i = 0; i < n; i++) {
+        vIds[i] = vertexIds[indices[i]];
+      }
+
+      for (let i = 0; i < n; i++) {
+        const curr = this.vertices.get(vIds[i])!.position;
+        const next = this.vertices.get(vIds[(i + 1) % n])!.position;
+        nx += (curr.y - next.y) * (curr.z + next.z);
+        ny += (curr.z - next.z) * (curr.x + next.x);
+        nz += (curr.x - next.x) * (curr.y + next.y);
+      }
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      const normal = { x: nx / len, y: ny / len, z: nz / len };
+      const p0 = this.vertices.get(vIds[0])!.position;
+
+      const id = `f${counter++}`;
+      this.faces.set(id, {
+        id,
+        vertexIds: vIds,
+        normal,
+        plane: { normal, distance: normal.x * p0.x + normal.y * p0.y + normal.z * p0.z },
+        materialIndex: -1,
+        backMaterialIndex: -1,
+        selected: false,
+        hidden: false,
+        area: 0,
+      });
+    }
+
+    return vertexIds;
+  }
 }

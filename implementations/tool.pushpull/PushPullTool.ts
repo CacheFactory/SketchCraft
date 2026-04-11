@@ -40,6 +40,7 @@ export class PushPullTool extends BaseTool {
 
   deactivate(): void {
     if (this.phase !== 'idle') this.abortTransaction();
+    this.document.selection.setPreSelection(null);
     this.reset();
     super.deactivate();
   }
@@ -66,6 +67,26 @@ export class PushPullTool extends BaseTool {
   }
 
   onMouseMove(event: ToolMouseEvent): void {
+    if (this.phase === 'idle') {
+      // Pre-selection highlight: show which face will be pushed/pulled
+      const hits = this.viewport.raycastScene(event.screenX, event.screenY);
+      let foundFace = false;
+      for (const hit of hits) {
+        const face = this.document.geometry.getFace(hit.entityId);
+        if (face) {
+          this.document.selection.setPreSelection(face.id);
+          this.setViewportCursor(true);
+          foundFace = true;
+          break;
+        }
+      }
+      if (!foundFace) {
+        this.document.selection.setPreSelection(null);
+        this.setViewportCursor(false);
+      }
+      return;
+    }
+
     if (this.phase !== 'drawing' || !this.faceNormal) return;
 
     // Use screen-space Y movement to determine extrusion distance.
@@ -120,6 +141,13 @@ export class PushPullTool extends BaseTool {
   }
 
   // ── Private ────────────────────────────────────────────
+
+  private setViewportCursor(isPointer: boolean): void {
+    const container = document.querySelector('.viewport-container') as HTMLElement;
+    if (container) {
+      container.style.cursor = isPointer ? 'pointer' : this.cursor;
+    }
+  }
 
   private startOnFace(face: IFace, screenY: number): void {
     this.selectedFaceId = face.id;

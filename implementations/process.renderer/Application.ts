@@ -37,6 +37,7 @@ import { TextTool } from '../tool.text/textTool';
 import { SectionPlaneTool } from '../tool.section_plane/SectionPlaneTool';
 import { SolidToolsTool } from '../tool.solid_tools/SolidToolsTool';
 import { AxesTool } from '../tool.axes/AxesTool';
+import { ModelAPI, IModelAPI } from '../api.model/ModelAPI';
 // SKP files are converted to OBJ by the native skp2obj tool in the main process
 
 export class Application implements IApplication {
@@ -45,6 +46,7 @@ export class Application implements IApplication {
   toolManager!: IToolManager;
   inference!: IInferenceEngine;
   sceneBridge!: SceneBridge;
+  modelAPI!: IModelAPI;
 
   private initialized = false;
 
@@ -73,10 +75,20 @@ export class Application implements IApplication {
     this.toolManager = new ToolManager();
     this.registerTools();
 
-    // 6. Default to select tool
+    // 6. Create Model API facade
+    this.modelAPI = new ModelAPI(
+      this.document,
+      () => this.syncScene(),
+      this.viewport.camera,
+    );
+
+    // Expose on window for plugins and dev console
+    (window as any).modelAPI = this.modelAPI;
+
+    // 7. Default to select tool
     this.toolManager.activateTool('tool.select');
 
-    // 7. Listen for IPC menu actions
+    // 8. Listen for IPC menu actions
     this.setupIPCListeners();
 
     this.initialized = true;
@@ -259,22 +271,27 @@ export class Application implements IApplication {
     const result = await (window.api as any).invoke('file:open');
     if (!result) return;
 
-    const ext = result.filePath.split('.').pop()?.toLowerCase();
-    if (ext === 'skp') {
-      // Convert SKP to OBJ using native skp2obj tool
-      const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
-      if (converted) {
-        this.importOBJ(converted.data);
+    try {
+      const ext = result.filePath.split('.').pop()?.toLowerCase();
+      if (ext === 'skp') {
+        this.emitProgress('Converting SKP file...', -1);
+        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
+        if (converted) {
+          await this.importOBJ(converted.data);
+        } else {
+          console.error('Failed to convert SKP file');
+          return;
+        }
       } else {
-        console.error('Failed to convert SKP file');
-        return;
+        this.emitProgress('Loading file...', 0);
+        await this.importOBJ(result.data);
       }
-    } else {
-      this.importOBJ(result.data);
+      this.document.filePath = result.filePath;
+      this.document.markClean();
+      // Scene sync is now handled inside importOBJ
+    } finally {
+      this.emitProgress('', 0, true);
     }
-    this.document.filePath = result.filePath;
-    this.document.markClean();
-    this.sceneBridge.sync();
   }
 
   async saveDocument(): Promise<void> {
@@ -339,57 +356,99 @@ export class Application implements IApplication {
     return new TextEncoder().encode(text).buffer;
   }
 
-  /** Import OBJ data into the current document */
-  private importOBJ(data: ArrayBuffer): void {
+  private emitProgress(message: string, progress = -1, done = false) {
+    window.dispatchEvent(new CustomEvent('import-progress', {
+      detail: { message, progress, done },
+    }));
+  }
+
+  /** Yield to the event loop so the UI can repaint */
+  private yieldUI(): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  /** Import OBJ data into the current document using fast bulk import */
+  private async importOBJ(data: ArrayBuffer): Promise<void> {
+    this.emitProgress('Parsing file...', 0.1);
+    await this.yieldUI();
+
     const text = new TextDecoder().decode(data);
-    const objLines = text.split('\n');
+    const lines = text.split('\n');
 
     this.document.newDocument();
     const geo = this.document.geometry;
 
-    const vertexIds: string[] = []; // 0-indexed
+    const vertices: Array<{ x: number; y: number; z: number }> = [];
+    const faces: number[][] = [];
+    const standaloneEdges: [number, number][] = [];
 
-    for (const line of objLines) {
+    for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed.startsWith('#') || trimmed === '') continue;
+      if (trimmed.length === 0 || trimmed.charCodeAt(0) === 35) continue;
 
       const parts = trimmed.split(/\s+/);
       const cmd = parts[0];
 
       if (cmd === 'v' && parts.length >= 4) {
-        const x = parseFloat(parts[1]);
-        const y = parseFloat(parts[2]);
-        const z = parseFloat(parts[3]);
-        const v = geo.createVertex({ x, y, z });
-        vertexIds.push(v.id);
+        vertices.push({
+          x: parseFloat(parts[1]),
+          y: parseFloat(parts[2]),
+          z: parseFloat(parts[3]),
+        });
       } else if (cmd === 'f' && parts.length >= 4) {
-        // Face indices are 1-based, may have /vt/vn suffixes
-        const faceVertIds: string[] = [];
+        const indices: number[] = [];
         for (let i = 1; i < parts.length; i++) {
-          const idxStr = parts[i].split('/')[0];
-          const objIdx = parseInt(idxStr, 10);
-          if (objIdx > 0 && objIdx <= vertexIds.length) {
-            faceVertIds.push(vertexIds[objIdx - 1]);
-          }
+          const idx = parseInt(parts[i].split('/')[0], 10) - 1;
+          if (idx >= 0 && idx < vertices.length) indices.push(idx);
         }
-        if (faceVertIds.length >= 3) {
-          // Create edges
-          for (let i = 0; i < faceVertIds.length; i++) {
-            const next = (i + 1) % faceVertIds.length;
-            geo.createEdge(faceVertIds[i], faceVertIds[next]);
-          }
-          try { geo.createFace(faceVertIds); } catch {}
-        }
+        if (indices.length >= 3) faces.push(indices);
       } else if (cmd === 'l' && parts.length >= 3) {
-        // Line/edge
         for (let i = 1; i < parts.length - 1; i++) {
-          const i1 = parseInt(parts[i], 10);
-          const i2 = parseInt(parts[i + 1], 10);
-          if (i1 > 0 && i2 > 0 && i1 <= vertexIds.length && i2 <= vertexIds.length) {
-            geo.createEdge(vertexIds[i1 - 1], vertexIds[i2 - 1]);
-          }
+          const i1 = parseInt(parts[i], 10) - 1;
+          const i2 = parseInt(parts[i + 1], 10) - 1;
+          if (i1 >= 0 && i2 >= 0) standaloneEdges.push([i1, i2]);
         }
       }
+    }
+
+    console.log(`[import] Parsed OBJ: ${vertices.length} vertices, ${faces.length} faces, ${standaloneEdges.length} standalone edges`);
+    console.log(`[import] Memory before bulkImport: ${(performance as any).memory ? ((performance as any).memory.usedJSHeapSize / 1024 / 1024).toFixed(0) + 'MB' : 'N/A'}`);
+    this.emitProgress(
+      `Building geometry: ${vertices.length.toLocaleString()} vertices, ${faces.length.toLocaleString()} faces...`,
+      0.4,
+    );
+    await this.yieldUI();
+
+    try {
+      const t0 = performance.now();
+      geo.bulkImport(vertices, faces, standaloneEdges.length > 0 ? standaloneEdges : undefined);
+      const t1 = performance.now();
+      console.log(`[import] bulkImport completed in ${(t1 - t0).toFixed(0)}ms`);
+      console.log(`[import] Memory after bulkImport: ${(performance as any).memory ? ((performance as any).memory.usedJSHeapSize / 1024 / 1024).toFixed(0) + 'MB' : 'N/A'}`);
+    } catch (e) {
+      console.error('[import] bulkImport FAILED:', e);
+      this.emitProgress('Import failed: ' + (e as Error).message, 1, false);
+      await this.yieldUI();
+      return;
+    }
+
+    this.emitProgress('Rendering scene...', 0.85);
+    await this.yieldUI();
+
+    try {
+      const faceCount = geo.getMesh().faces.size;
+      console.log(`[import] Starting scene sync for ${faceCount} faces...`);
+      const t2 = performance.now();
+      // Use batched sync for large models (>1000 faces) to avoid OOM from per-face meshes
+      if (faceCount > 1000) {
+        console.log(`[import] Using batched sync (${faceCount} faces)`);
+        this.sceneBridge.syncBatched();
+      } else {
+        this.sceneBridge.sync();
+      }
+      console.log(`[import] Scene sync completed in ${(performance.now() - t2).toFixed(0)}ms`);
+    } catch (e) {
+      console.error('[import] scene sync FAILED:', e);
     }
   }
 
@@ -398,20 +457,26 @@ export class Application implements IApplication {
     const result = await window.api.invoke('file:import', {
       formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.dxf', '.step', '.stp', '.fbx'],
     });
-    if (result) {
-      const ext = result.format?.toLowerCase() || result.filePath?.split('.').pop()?.toLowerCase();
+    if (!result) return;
+
+    const ext = result.format?.toLowerCase() || result.filePath?.split('.').pop()?.toLowerCase();
+    try {
       if (ext === 'skp') {
+        this.emitProgress('Converting SKP file...', -1);
+        console.log('[import] Starting SKP conversion...');
         const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
         if (converted) {
-          this.importOBJ(converted.data);
-          this.sceneBridge.sync();
+          console.log(`[import] SKP converted, OBJ size: ${(converted.data.byteLength / 1024 / 1024).toFixed(1)}MB`);
+          await this.importOBJ(converted.data);
         }
       } else if (ext === 'obj') {
-        this.importOBJ(result.data);
-        this.sceneBridge.sync();
+        this.emitProgress('Loading OBJ file...', 0);
+        await this.importOBJ(result.data);
       } else {
         console.log(`Importing ${result.format} file: ${result.filePath}`);
       }
+    } finally {
+      this.emitProgress('', 0, true);
     }
   }
 

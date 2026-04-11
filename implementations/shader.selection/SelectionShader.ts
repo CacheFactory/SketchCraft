@@ -55,7 +55,7 @@ void main() {
 `;
 
 export const SELECTION_COLOR = new THREE.Vector3(0.2, 0.5, 1.0); // bright blue
-export const PRE_SELECTION_COLOR = new THREE.Vector3(1.0, 0.6, 0.0); // orange
+export const PRE_SELECTION_COLOR = new THREE.Vector3(0.27, 0.53, 1.0); // blue
 
 /**
  * Creates a stencil-based outline material for selected objects.

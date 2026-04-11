@@ -27,6 +27,7 @@ const INVOKE_CHANNELS: ReadonlySet<string> = new Set<keyof MainProcessAPI>([
   'app:get-version',
   'app:get-user-data-path',
   'app:quit',
+  'ai:chat',
 ]);
 
 // Allowed IPC event channels (main -> renderer)

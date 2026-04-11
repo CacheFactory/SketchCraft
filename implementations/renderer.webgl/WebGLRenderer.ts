@@ -311,9 +311,9 @@ export class WebGLRenderer implements IRenderer {
   });
 
   private _preSelHighlightFace = new THREE.MeshBasicMaterial({
-    color: 0xffaa22,
+    color: 0x4488ff,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.5,
     side: THREE.DoubleSide,
     depthTest: true,
     polygonOffset: true,
@@ -322,7 +322,7 @@ export class WebGLRenderer implements IRenderer {
   });
 
   private _preSelHighlightEdge = new THREE.LineBasicMaterial({
-    color: 0xff8800,
+    color: 0x2266dd,
     linewidth: 5,
   });
 

@@ -3195,6 +3195,37 @@ nodes:
         Extensible via toolPanels map keyed by tool ID. Paint tool settings include color picker, material swatch grid with
         procedural texture thumbnails, add/delete material controls, and active material preview.
   uuid: sPnlTlSt
+- id: api.model
+  kind: component
+  layer: logical
+  name: Model API Facade
+  x:
+    impl:
+      language: TypeScript
+      complexity: moderate
+      status: implemented
+    docs:
+      description: High-level programmatic API for 3D model operations. Provides shape primitives (box, cylinder, sphere),
+        transforms (move, rotate, scale), extrude, material assignment, queries, and batch operations. Every mutation
+        is wrapped in a history transaction for automatic undo. Serves as the interface for both AI chat and plugin system.
+        Exposed on window.modelAPI for dev console access.
+  uuid: aP1MdlAp
+- id: ai.chat
+  kind: component
+  layer: logical
+  name: AI Chat Assistant
+  x:
+    impl:
+      language: TypeScript
+      framework: React
+      complexity: complex
+      status: implemented
+    docs:
+      description: AI-powered chat sub-window that interprets natural language instructions into 3D model operations.
+        Uses Claude API via main process IPC. Builds selection context (selected faces, edges, vertices with geometry info)
+        and sends it with each message. Claude responds with tool calls that execute against the ModelAPI.
+        Supports multi-turn tool use loops, batch operations, and automatic undo for all AI actions.
+  uuid: aI1ChAtP
 edges:
 - kind: contains
   from: data.scene
@@ -6878,6 +6909,81 @@ edges:
       description: SceneBridge reads material definitions to apply PBR properties (color, roughness, metalness, opacity) and
         texture maps to Three.js mesh materials. Uses face-local UV projection for texture mapping.
   uuid: eSbMatRd
+- kind: contains
+  from: process.renderer
+  to: api.model
+  layer: system
+  x:
+    docs:
+      description: Application instantiates and owns the ModelAPI, exposing it on window.modelAPI.
+  uuid: ePrApiMd
+- kind: calls
+  from: api.model
+  to: engine.geometry
+  layer: runtime
+  x:
+    docs:
+      description: ModelAPI delegates shape creation, transforms, and queries to the geometry engine.
+  uuid: eApGeoEn
+- kind: calls
+  from: api.model
+  to: data.materials
+  layer: runtime
+  x:
+    docs:
+      description: ModelAPI creates and assigns materials via the material manager.
+  uuid: eApMatMg
+- kind: calls
+  from: api.model
+  to: data.history
+  layer: runtime
+  x:
+    docs:
+      description: ModelAPI wraps every mutation in begin/commit transaction for automatic undo.
+  uuid: eApHstMg
+- kind: calls
+  from: api.model
+  to: data.selection
+  layer: runtime
+  x:
+    docs:
+      description: ModelAPI provides select/clear/selectAll operations.
+  uuid: eApSelMg
+- kind: uses
+  from: plugin.system
+  to: api.model
+  layer: system
+  x:
+    docs:
+      description: Plugins call ModelAPI to create geometry, apply materials, and query the model.
+  uuid: ePlgApi
+- kind: calls
+  from: ai.chat
+  to: api.model
+  layer: runtime
+  x:
+    docs:
+      description: AI chat executes tool calls (createBox, extrudeFace, moveEntities, etc.) against the ModelAPI.
+  uuid: eAiApiMd
+- kind: calls
+  from: ai.chat
+  to: process.main
+  layer: runtime
+  x:
+    docs:
+      description: AI chat sends messages to main process via IPC ai:chat channel for Claude API calls.
+    ipc:
+      channel: ai:chat
+      protocol: ipc
+  uuid: eAiMainP
+- kind: contains
+  from: window.main
+  to: ai.chat
+  layer: ui
+  x:
+    docs:
+      description: AI chat panel is rendered as a floating sub-window inside the main application window.
+  uuid: eWnAiCht
 views:
 - name: User Workflow
   description: End-to-end view from actor through UI to geometry

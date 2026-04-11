@@ -402,6 +402,83 @@ export class GeometryEngine implements IGeometryEngine {
     return face;
   }
 
+  // ─── Bulk import (fast path — skips per-entity topology checks) ──
+
+  /**
+   * Import pre-parsed OBJ geometry in bulk. Uses numeric IDs (not UUIDs),
+   * hash-based edge dedup, and skips half-edge topology for maximum speed.
+   * Returns the vertex IDs array (0-indexed, matching input order).
+   */
+  bulkImport(
+    vertices: Vec3[],
+    faces: number[][],
+    standaloneEdges?: [number, number][],
+  ): string[] {
+    // Clean faces and collect unique edge pairs (by vertex index)
+    const edgeSet = new Set<number>();
+    const edgeKey = (a: number, b: number) => a < b ? a * 2000000 + b : b * 2000000 + a;
+    const edgePairs: [number, number][] = [];
+
+    const cleanedFaces: number[][] = [];
+    for (const faceIndices of faces) {
+      if (faceIndices.length < 3) continue;
+      let valid = true;
+      const cleaned: number[] = [];
+      const seen = new Set<number>();
+      for (let i = 0; i < faceIndices.length; i++) {
+        const idx = faceIndices[i];
+        if (idx < 0 || idx >= vertices.length) { valid = false; break; }
+        const prev = i === 0 ? faceIndices[faceIndices.length - 1] : faceIndices[i - 1];
+        if (idx !== prev && !seen.has(idx)) {
+          cleaned.push(idx);
+          seen.add(idx);
+        }
+      }
+      if (!valid || cleaned.length < 3) continue;
+
+      // Skip non-planar faces: compute normal from first 3 vertices, then check
+      // that all remaining vertices lie within tolerance of that plane.
+      const p0 = vertices[cleaned[0]], p1 = vertices[cleaned[1]], p2 = vertices[cleaned[2]];
+      const e1x = p1.x - p0.x, e1y = p1.y - p0.y, e1z = p1.z - p0.z;
+      const e2x = p2.x - p0.x, e2y = p2.y - p0.y, e2z = p2.z - p0.z;
+      let fnx = e1y * e2z - e1z * e2y;
+      let fny = e1z * e2x - e1x * e2z;
+      let fnz = e1x * e2y - e1y * e2x;
+      const flen = Math.sqrt(fnx * fnx + fny * fny + fnz * fnz);
+      if (flen < 1e-10) continue; // degenerate triangle
+      fnx /= flen; fny /= flen; fnz /= flen;
+      const fd = fnx * p0.x + fny * p0.y + fnz * p0.z;
+
+      let planar = true;
+      for (let i = 3; i < cleaned.length; i++) {
+        const pi = vertices[cleaned[i]];
+        const dist = Math.abs(fnx * pi.x + fny * pi.y + fnz * pi.z - fd);
+        if (dist > 0.01) { planar = false; break; }
+      }
+      if (!planar) continue;
+
+      cleanedFaces.push(cleaned);
+
+      for (let i = 0; i < cleaned.length; i++) {
+        const a = cleaned[i], b = cleaned[(i + 1) % cleaned.length];
+        const k = edgeKey(a, b);
+        if (!edgeSet.has(k)) { edgeSet.add(k); edgePairs.push([a, b]); }
+      }
+    }
+
+    if (standaloneEdges) {
+      for (const [a, b] of standaloneEdges) {
+        if (a >= 0 && b >= 0 && a < vertices.length && b < vertices.length) {
+          const k = edgeKey(a, b);
+          if (!edgeSet.has(k)) { edgeSet.add(k); edgePairs.push([a, b]); }
+        }
+      }
+    }
+
+    // Fast bulk add to mesh — numeric IDs, no UUIDs, no half-edges
+    return this.mesh.bulkAdd(vertices, cleanedFaces, edgePairs);
+  }
+
   // ─── Delete operations ──────────────────────────────────────────
 
   deleteVertex(id: string): void {

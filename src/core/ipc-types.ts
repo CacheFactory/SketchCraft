@@ -3,6 +3,7 @@
 
 export interface UserPreferences {
   units: 'mm' | 'cm' | 'm' | 'inches' | 'feet';
+  unitSystem: 'metric' | 'imperial';
   gridSpacing: number;
   snapEnabled: boolean;
   autoSaveInterval: number;
@@ -11,10 +12,12 @@ export interface UserPreferences {
   recentFiles: string[];
   defaultTemplate: string;
   renderQuality: 'low' | 'medium' | 'high';
+  anthropicApiKey: string;
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   units: 'm',
+  unitSystem: 'metric',
   gridSpacing: 1,
   snapEnabled: true,
   autoSaveInterval: 300000, // 5 minutes
@@ -51,6 +54,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   recentFiles: [],
   defaultTemplate: 'default',
   renderQuality: 'high',
+  anthropicApiKey: '',
 };
 
 export type MenuAction =
@@ -79,6 +83,7 @@ export interface MainProcessAPI {
   'app:get-version': () => Promise<string>;
   'app:get-user-data-path': () => Promise<string>;
   'app:quit': () => Promise<void>;
+  'ai:chat': (args: { messages: Array<{ role: string; content: unknown }>; tools: unknown[]; system: string }) => Promise<unknown>;
 }
 
 export interface RendererEvents {
