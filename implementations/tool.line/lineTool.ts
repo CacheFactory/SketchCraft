@@ -31,9 +31,7 @@ export class LineTool extends BaseTool {
 
   deactivate(): void {
     if (this.points.length > 1) {
-      if (this.vertexIds.length >= 2) {
-        this.document.geometry.splitFaceWithPath(this.vertexIds);
-      }
+      // createEdgeWithIntersection already handles face splitting via autoCreateFaces
       this.commitTransaction();
     } else if (this.points.length === 1) {
       this.abortTransaction();

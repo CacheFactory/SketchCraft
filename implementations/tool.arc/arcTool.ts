@@ -176,15 +176,13 @@ export class ArcTool extends BaseTool {
       vertexIds.push(v.id);
     }
 
-    // Create all arc edges with intersection detection, grouped under a single curveId
+    // Create all arc edges with intersection detection, grouped under a single curveId.
+    // createEdgeWithIntersection handles face splitting via autoCreateFaces.
     const curveId = uuid();
     for (let i = 0; i < vertexIds.length - 1; i++) {
       const edges = this.document.geometry.createEdgeWithIntersection(vertexIds[i], vertexIds[i + 1]);
       for (const edge of edges) edge.curveId = curveId;
     }
-
-    // Split any face the arc bisects (endpoints on face boundary).
-    this.document.geometry.splitFaceWithPath(vertexIds);
 
     this.commitTransaction();
     this.reset();

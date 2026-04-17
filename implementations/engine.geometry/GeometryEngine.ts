@@ -282,45 +282,69 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   /**
-   * Split a face into two faces along the edge between v1 and v2.
-   * Both v1 and v2 must be on the face's boundary.
+   * Split a face into two faces along two boundary vertices.
+   * Optionally includes interior path vertices (for arc/path splitting).
+   * Both v1Id and v2Id must be on the face's boundary.
    */
-  private splitFaceWithEdge(faceId: string, v1Id: string, v2Id: string): void {
+  private splitFaceAtBoundary(
+    faceId: string, v1Id: string, v2Id: string, pathInterior: string[] = [],
+  ): boolean {
     const face = this.mesh.faces.get(faceId);
-    if (!face) return;
+    if (!face) return false;
 
     const verts = face.vertexIds;
     const idx1 = verts.indexOf(v1Id);
     const idx2 = verts.indexOf(v2Id);
-    if (idx1 === -1 || idx2 === -1) return;
+    if (idx1 === -1 || idx2 === -1) return false;
 
-    // Ensure idx1 < idx2 for consistent splitting
+    const n = verts.length;
+    const diff = Math.abs(idx1 - idx2);
+    if (diff === 1 || diff === n - 1) return false; // Adjacent — can't split
+
     const lo = Math.min(idx1, idx2);
     const hi = Math.max(idx1, idx2);
+    const isV1Lo = idx1 <= idx2;
 
-    // Face 1: vertices from lo to hi (inclusive)
-    const face1Verts: string[] = [];
-    for (let i = lo; i <= hi; i++) {
-      face1Verts.push(verts[i]);
+    // Boundary side 1: vertices from lo to hi (inclusive)
+    const side1: string[] = [];
+    for (let i = lo; i <= hi; i++) side1.push(verts[i]);
+
+    // Boundary side 2: vertices from hi to lo (wrapping)
+    const side2: string[] = [];
+    for (let i = hi; i !== lo; i = (i + 1) % n) side2.push(verts[i]);
+    side2.push(verts[lo]);
+
+    let faceA: string[];
+    let faceB: string[];
+
+    if (pathInterior.length === 0) {
+      // Simple edge split — no interior vertices
+      faceA = side1;
+      faceB = side2;
+    } else if (isV1Lo) {
+      faceA = [...side1, ...pathInterior.slice().reverse()];
+      faceB = [verts[lo], ...pathInterior, verts[hi]];
+      for (let i = (hi + 1) % n; i !== lo; i = (i + 1) % n) faceB.push(verts[i]);
+    } else {
+      faceA = [...side1, ...pathInterior.slice()];
+      faceB = [verts[hi], ...pathInterior.slice().reverse(), verts[lo]];
+      for (let i = (lo + 1) % n; i !== hi; i = (i + 1) % n) faceB.push(verts[i]);
     }
 
-    // Face 2: vertices from hi to lo (wrapping around, inclusive)
-    const face2Verts: string[] = [];
-    for (let i = hi; i !== lo; i = (i + 1) % verts.length) {
-      face2Verts.push(verts[i]);
-    }
-    face2Verts.push(verts[lo]);
-
-    // Delete the original face
     this.deleteFace(faceId);
 
-    // Create the two new faces (only if they have 3+ vertices)
-    if (face1Verts.length >= 3) {
-      try { this.createFace(face1Verts); } catch {}
+    if (faceA.length >= 3) {
+      try { this.createFace(faceA); } catch {}
     }
-    if (face2Verts.length >= 3) {
-      try { this.createFace(face2Verts); } catch {}
+    if (faceB.length >= 3) {
+      try { this.createFace(faceB); } catch {}
     }
+    return true;
+  }
+
+  /** Split a face along an edge between two boundary vertices. */
+  private splitFaceWithEdge(faceId: string, v1Id: string, v2Id: string): void {
+    this.splitFaceAtBoundary(faceId, v1Id, v2Id);
   }
 
   /**
@@ -418,9 +442,15 @@ export class GeometryEngine implements IGeometryEngine {
     if (pathVertexIds.length < 2) return;
     const startId = pathVertexIds[0];
     const endId = pathVertexIds[pathVertexIds.length - 1];
+    const pathInterior = pathVertexIds.slice(1, -1);
 
-    // Find a face where start and end are on the boundary or on a boundary edge
-    for (const [faceId, face] of this.mesh.faces) {
+    // Collect face IDs first to avoid mutating the map during iteration
+    const faceIds = [...this.mesh.faces.keys()];
+
+    for (const faceId of faceIds) {
+      const face = this.mesh.faces.get(faceId);
+      if (!face) continue;
+
       let verts = [...face.vertexIds];
 
       // For each path endpoint, if it's not in the vertex list,
@@ -431,7 +461,6 @@ export class GeometryEngine implements IGeometryEngine {
         const checkVert = this.mesh.vertices.get(checkId);
         if (!checkVert) continue;
 
-        // Check each edge of the face boundary
         let inserted = false;
         for (let i = 0; i < verts.length && !inserted; i++) {
           const nextI = (i + 1) % verts.length;
@@ -439,102 +468,35 @@ export class GeometryEngine implements IGeometryEngine {
           const vb = this.mesh.vertices.get(verts[nextI]);
           if (!va || !vb) continue;
 
-          // Check if checkVert is on the edge va→vb (within tolerance)
           const edgeDir = vec3.sub(vb.position, va.position);
           const edgeLen = vec3.length(edgeDir);
           if (edgeLen < 1e-10) continue;
 
           const toPoint = vec3.sub(checkVert.position, va.position);
           const t = vec3.dot(toPoint, edgeDir) / (edgeLen * edgeLen);
-
-          if (t < -0.01 || t > 1.01) continue; // Not on edge segment
+          if (t < -0.01 || t > 1.01) continue;
 
           const closest = vec3.add(va.position, vec3.mul(edgeDir, t));
-          const dist = vec3.distance(closest, checkVert.position);
-
-          if (dist < 0.05) { // On this edge
-            // Insert the vertex into the face boundary between i and nextI
+          if (vec3.distance(closest, checkVert.position) < 0.05) {
             verts.splice(i + 1, 0, checkId);
 
-            // Also split the geometric edge
             const existingEdge = this.mesh.findEdgeBetween(verts[i], verts[i + 2]);
             if (existingEdge) {
-              // Remove old edge, create two new ones
               this.mesh.removeEdge(existingEdge.id);
               this.mesh.addEdge(verts[i], checkId);
               this.mesh.addEdge(checkId, verts[i + 2]);
             }
-
             inserted = true;
           }
         }
       }
 
-      // Update the face's vertex list with any inserted vertices
-      // (need to update the actual face in the mesh)
       face.vertexIds = verts;
 
-      const idxStart = verts.indexOf(startId);
-      const idxEnd = verts.indexOf(endId);
-      if (idxStart === -1 || idxEnd === -1) continue;
-      if (verts.length < 3) continue;
+      if (!verts.includes(startId) || !verts.includes(endId)) continue;
 
-      // Don't split if start and end are adjacent (the path would just be one edge)
-      const n = verts.length;
-      const diff = Math.abs(idxStart - idxEnd);
-      if (diff === 1 || diff === n - 1) continue;
-
-      // Build two new faces:
-      // Face 1: go from start to end clockwise on the boundary
-      // Face 2: go from end to start clockwise + path vertices in between
-      const lo = Math.min(idxStart, idxEnd);
-      const hi = Math.max(idxStart, idxEnd);
-      const isStartLo = idxStart <= idxEnd;
-
-      // Boundary side 1: vertices from lo to hi (inclusive)
-      const side1: string[] = [];
-      for (let i = lo; i <= hi; i++) side1.push(verts[i]);
-
-      // Boundary side 2: vertices from hi to lo (wrapping)
-      const side2: string[] = [];
-      for (let i = hi; i !== lo; i = (i + 1) % n) side2.push(verts[i]);
-      side2.push(verts[lo]);
-
-      // The path interior (excluding start/end which are already on the boundary)
-      const pathInterior = pathVertexIds.slice(1, -1);
-
-      // Face A = side1 + path interior going from end to start
-      // Face B = side2 + path interior going from start to end
-      // We need to figure out which direction the path goes relative to the face boundary
-      let faceA: string[];
-      let faceB: string[];
-
-      if (isStartLo) {
-        // side1 goes lo→hi on boundary, path goes lo→hi through interior
-        // Face A = boundary from lo to hi + arc reversed back to lo
-        faceA = [...side1, ...pathInterior.slice().reverse()];
-        // Face B = arc from lo to hi + boundary from hi back to lo
-        faceB = [verts[lo], ...pathInterior, verts[hi]];
-        for (let i = (hi + 1) % n; i !== lo; i = (i + 1) % n) faceB.push(verts[i]);
-      } else {
-        // side1 goes lo→hi on boundary, path goes hi→lo through interior
-        faceA = [...side1, ...pathInterior.slice()];
-        faceB = [verts[hi], ...pathInterior.slice().reverse(), verts[lo]];
-        for (let i = (lo + 1) % n; i !== hi; i = (i + 1) % n) faceB.push(verts[i]);
-      }
-
-      // Delete original face
-      this.deleteFace(faceId);
-
-      // Create the two new faces
-      if (faceA.length >= 3) {
-        try { this.createFace(faceA); } catch {}
-      }
-      if (faceB.length >= 3) {
-        try { this.createFace(faceB); } catch {}
-      }
-
-      return; // Only split one face per call
+      this.splitFaceAtBoundary(faceId, startId, endId, pathInterior);
+      // Don't return — continue checking other faces
     }
   }
 

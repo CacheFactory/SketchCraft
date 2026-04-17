@@ -234,7 +234,7 @@ export class Application implements IApplication {
     this.viewport.renderer.setSelectionHighlight(highlightIds);
 
     // Pre-selection: resolve all pre-selected IDs (supports curve multi-select)
-    const preSelIds = (sel as any).getPreSelectionIds?.() ?? (sel.state.preSelectionId ? [sel.state.preSelectionId] : []);
+    const preSelIds = sel.getPreSelectionIds();
     const preSelHighlightIds: string[] = [];
     for (const pid of preSelIds) {
       if (sm?.components?.has(pid)) {
@@ -246,11 +246,7 @@ export class Application implements IApplication {
         preSelHighlightIds.push(pid);
       }
     }
-    if ((this.viewport.renderer as any).setPreSelectionHighlightMulti) {
-      (this.viewport.renderer as any).setPreSelectionHighlightMulti(preSelHighlightIds);
-    } else {
-      this.viewport.renderer.setPreSelectionHighlight(preSelHighlightIds[0] ?? null);
-    }
+    this.viewport.renderer.setPreSelectionHighlightMulti(preSelHighlightIds);
 
     return { entityIds: ids, count: ids.length };
   }

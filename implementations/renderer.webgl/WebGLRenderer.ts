@@ -46,7 +46,6 @@ export class WebGLRenderer implements IRenderer {
   private _selectionOutlines: THREE.Group;
   private _preSelectionOutline: THREE.Group;
   private _selectedEntityIds: Set<string> = new Set();
-  private _preSelectionEntityId: string | null = null;
   private _preSelectionEntityIds: Set<string> = new Set();
 
   // Entity-to-object map (populated externally)
@@ -292,7 +291,6 @@ export class WebGLRenderer implements IRenderer {
     }
 
     this._preSelectionEntityIds = new Set(entityIds);
-    this._preSelectionEntityId = entityIds.length > 0 ? entityIds[0] : null;
 
     for (const id of entityIds) {
       if (!this._selectedEntityIds.has(id)) {
