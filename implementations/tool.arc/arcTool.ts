@@ -5,6 +5,7 @@ import type { Vec3, Plane } from '../../src/core/types';
 import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool, DRAWING_PLANES } from '../tool.select/BaseTool';
+import { v4 as uuid } from 'uuid';
 
 export class ArcTool extends BaseTool {
   readonly id = 'tool.arc';
@@ -175,13 +176,14 @@ export class ArcTool extends BaseTool {
       vertexIds.push(v.id);
     }
 
-    // Create all arc edges (plain, no auto-face yet)
+    // Create all arc edges with intersection detection, grouped under a single curveId
+    const curveId = uuid();
     for (let i = 0; i < vertexIds.length - 1; i++) {
-      this.document.geometry.createEdge(vertexIds[i], vertexIds[i + 1]);
+      const edges = this.document.geometry.createEdgeWithIntersection(vertexIds[i], vertexIds[i + 1]);
+      for (const edge of edges) edge.curveId = curveId;
     }
 
-    // Split any face the arc bisects.
-    // This handles endpoints on face corners AND on face edges.
+    // Split any face the arc bisects (endpoints on face boundary).
     this.document.geometry.splitFaceWithPath(vertexIds);
 
     this.commitTransaction();

@@ -5,6 +5,7 @@ import type { Vec3, Plane } from '../../src/core/types';
 import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
+import { v4 as uuid } from 'uuid';
 
 export class CircleTool extends BaseTool {
   readonly id = 'tool.circle';
@@ -159,14 +160,13 @@ export class CircleTool extends BaseTool {
       vertexIds.push(vertex.id);
     }
 
-    // Create edges
+    // Create edges with intersection detection, grouped as a curve
+    const curveId = uuid();
     for (let i = 0; i < this.segments; i++) {
       const next = (i + 1) % this.segments;
-      this.document.geometry.createEdge(vertexIds[i], vertexIds[next]);
+      const edges = this.document.geometry.createEdgeWithIntersection(vertexIds[i], vertexIds[next]);
+      for (const edge of edges) edge.curveId = curveId;
     }
-
-    // Create face
-    this.document.geometry.createFace(vertexIds);
 
     this.commitTransaction();
     this.reset();

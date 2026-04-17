@@ -26,6 +26,7 @@ export interface IEdge {
   selected: boolean;
   hidden: boolean;
   materialIndex: number;
+  curveId?: string;
 }
 
 export interface IFace {
@@ -38,6 +39,7 @@ export interface IFace {
   selected: boolean;
   hidden: boolean;
   area: number;
+  holeStartIndices?: number[];
 }
 
 export interface IHalfEdge {
@@ -61,6 +63,7 @@ export interface IGeometryEngine {
   createVertex(position: Vec3): IVertex;
   createEdge(v1Id: string, v2Id: string): IEdge;
   createEdgeWithAutoFace(v1Id: string, v2Id: string): IEdge;
+  createEdgeWithIntersection(v1Id: string, v2Id: string): IEdge[];
   splitFaceWithPath(pathVertexIds: string[]): void;
   createFace(vertexIds: string[]): IFace;
   deleteVertex(id: string): void;
@@ -75,6 +78,7 @@ export interface IGeometryEngine {
   getFaceVertices(faceId: string): IVertex[];
   getConnectedFaces(faceId: string): IFace[];
   findEdgeBetween(v1Id: string, v2Id: string): IEdge | undefined;
+  getCurveEdges(curveId: string): IEdge[];
   checkCoplanar(vertexIds: string[]): boolean;
   computeFaceNormal(faceId: string): Vec3;
   computeFaceArea(faceId: string): number;
@@ -193,6 +197,8 @@ export interface ISelectionManager {
 
   setMode(mode: SelectionMode): void;
   setPreSelection(entityId: string | null): void;
+  addPreSelection(entityId: string): void;
+  getPreSelectionIds(): string[];
   isSelected(entityId: string): boolean;
   getSelectedByType(type: EntityType): string[];
 

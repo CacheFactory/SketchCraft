@@ -18,6 +18,7 @@ type SelectionEvents = {
 
 export class SelectionManager implements ISelectionManager {
   private _state: ISelectionState;
+  private _extraPreSelectionIds = new Set<string>();
   private emitter = new SimpleEventEmitter<SelectionEvents>();
   private sceneManager: ISceneManager;
   private geometryEngine: IGeometryEngine | null;
@@ -180,9 +181,22 @@ export class SelectionManager implements ISelectionManager {
   }
 
   setPreSelection(entityId: string | null): void {
-    if (this._state.preSelectionId === entityId) return;
     this._state.preSelectionId = entityId;
+    this._extraPreSelectionIds.clear();
     this.emitter.emit('pre-selection-changed', entityId);
+  }
+
+  addPreSelection(entityId: string): void {
+    this._extraPreSelectionIds.add(entityId);
+    this.emitter.emit('pre-selection-changed', entityId);
+  }
+
+  /** Returns all pre-selected entity IDs (primary + extras). */
+  getPreSelectionIds(): string[] {
+    const ids: string[] = [];
+    if (this._state.preSelectionId) ids.push(this._state.preSelectionId);
+    for (const id of this._extraPreSelectionIds) ids.push(id);
+    return ids;
   }
 
   isSelected(entityId: string): boolean {

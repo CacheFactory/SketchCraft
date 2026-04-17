@@ -89,10 +89,13 @@ export class SelectTool extends BaseTool {
 
     // Instant point-pick using the pre-computed raycast hit
     if (event.hitEntityId) {
+      // Expand to full curve if the clicked edge belongs to one
+      const idsToSelect = this.expandCurve(event.hitEntityId);
       if (event.shiftKey) {
-        this.document.selection.toggle(event.hitEntityId);
+        for (const id of idsToSelect) this.document.selection.toggle(id);
       } else {
-        this.document.selection.select(event.hitEntityId);
+        this.document.selection.clear();
+        for (const id of idsToSelect) this.document.selection.add(id);
       }
       const count = this.document.selection.count;
       if (count === 1) {
@@ -149,7 +152,15 @@ export class SelectTool extends BaseTool {
         if (dimensionStore.isDimensionEntity(event.hitEntityId)) {
           this.setCursorPointer(true);
         } else {
-          this.document.selection.setPreSelection(event.hitEntityId);
+          // Expand to full curve for pre-selection highlight
+          const ids = this.expandCurve(event.hitEntityId);
+          this.document.selection.setPreSelection(ids[0]);
+          // Highlight all curve edges via the renderer
+          if (ids.length > 1) {
+            for (let i = 1; i < ids.length; i++) {
+              this.document.selection.addPreSelection(ids[i]);
+            }
+          }
           this.setCursorPointer(true);
         }
       } else {
@@ -261,6 +272,17 @@ export class SelectTool extends BaseTool {
   }
 
   getVCBLabel(): string { return ''; }
+
+  private expandCurve(entityId: string): string[] {
+    const edge = this.document.geometry.getEdge(entityId);
+    if (edge?.curveId) {
+      const curveEdges = this.document.geometry.getCurveEdges(edge.curveId);
+      if (curveEdges.length > 1) {
+        return curveEdges.map(e => e.id);
+      }
+    }
+    return [entityId];
+  }
 
   private getEntityTypeLabel(entityId: string): string {
     if (this.document.geometry.getFace(entityId)) return 'face';

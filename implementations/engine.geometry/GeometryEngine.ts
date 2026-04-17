@@ -97,6 +97,168 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   /**
+   * Create an edge from v1 to v2, detecting intersections with existing face boundary edges.
+   * At each intersection, a new vertex is created, the boundary edge is split, and the face
+   * boundary is updated. After all intersections are processed, edges are created between
+   * consecutive intersection points, and faces are split/auto-created.
+   * This is the core SketchUp behavior for drawing on existing geometry.
+   */
+  createEdgeWithIntersection(v1Id: string, v2Id: string): IEdge[] {
+    const v1 = this.mesh.vertices.get(v1Id);
+    const v2 = this.mesh.vertices.get(v2Id);
+    if (!v1 || !v2) throw new Error('Vertex not found');
+    if (v1Id === v2Id) throw new Error('Cannot create self-edge');
+
+    const p1 = v1.position;
+    const p2 = v2.position;
+
+    // Collect intersection points along the segment p1→p2
+    const intersections: Array<{ t: number; vertexId: string }> = [];
+
+    // For each face, check each boundary edge for intersection
+    for (const [, face] of this.mesh.faces) {
+      const verts = face.vertexIds;
+      for (let i = 0; i < verts.length; i++) {
+        const nextI = (i + 1) % verts.length;
+        const vaId = verts[i];
+        const vbId = verts[nextI];
+        const va = this.mesh.vertices.get(vaId);
+        const vb = this.mesh.vertices.get(vbId);
+        if (!va || !vb) continue;
+
+        // Skip boundary edges that share a vertex with the new edge
+        if (vaId === v1Id || vaId === v2Id || vbId === v1Id || vbId === v2Id) continue;
+
+        const result = this.segmentIntersect2D(p1, p2, va.position, vb.position);
+        if (!result) continue;
+
+        // Check if there's already an intersection vertex nearby
+        const intPoint = vec3.add(p1, vec3.mul(vec3.sub(p2, p1), result.t1));
+        let existingId: string | null = null;
+        for (const int of intersections) {
+          const existing = this.mesh.vertices.get(int.vertexId);
+          if (existing && vec3.distance(existing.position, intPoint) < 0.01) {
+            existingId = int.vertexId;
+            break;
+          }
+        }
+        // Also check existing vertices
+        if (!existingId) {
+          for (const [vid, vert] of this.mesh.vertices) {
+            if (vec3.distance(vert.position, intPoint) < 0.01) {
+              existingId = vid;
+              break;
+            }
+          }
+        }
+
+        const intVertexId = existingId ?? this.mesh.addVertex(intPoint).id;
+
+        if (!existingId) {
+          // Split the boundary edge at this point
+          const existingEdge = this.mesh.findEdgeBetween(vaId, vbId);
+          if (existingEdge) {
+            const curveId = existingEdge.curveId;
+            this.mesh.removeEdge(existingEdge.id);
+            const e1 = this.mesh.addEdge(vaId, intVertexId);
+            const e2 = this.mesh.addEdge(intVertexId, vbId);
+            if (curveId) { e1.curveId = curveId; e2.curveId = curveId; }
+          }
+
+          // Insert the vertex into ALL faces that have this boundary edge
+          for (const [, f] of this.mesh.faces) {
+            const fv = f.vertexIds;
+            for (let j = 0; j < fv.length; j++) {
+              const nextJ = (j + 1) % fv.length;
+              if ((fv[j] === vaId && fv[nextJ] === vbId) || (fv[j] === vbId && fv[nextJ] === vaId)) {
+                fv.splice(j + 1, 0, intVertexId);
+                break;
+              }
+            }
+          }
+        }
+
+        // Avoid duplicate intersections at the same t
+        if (!intersections.some(x => Math.abs(x.t - result.t1) < 1e-6)) {
+          intersections.push({ t: result.t1, vertexId: intVertexId });
+        }
+      }
+    }
+
+    // Sort intersections by parameter t along the new edge
+    intersections.sort((a, b) => a.t - b.t);
+
+    // Build the chain of vertices: v1 → int1 → int2 → ... → v2
+    const chain = [v1Id, ...intersections.map(i => i.vertexId), v2Id];
+
+    // Create edges along the chain and run auto-face for each
+    const createdEdges: IEdge[] = [];
+    for (let i = 0; i < chain.length - 1; i++) {
+      if (chain[i] === chain[i + 1]) continue;
+      try {
+        const edge = this.createEdgeWithAutoFace(chain[i], chain[i + 1]);
+        createdEdges.push(edge);
+      } catch {
+        // Edge may already exist
+        const existing = this.mesh.findEdgeBetween(chain[i], chain[i + 1]);
+        if (existing) createdEdges.push(existing);
+      }
+    }
+
+    return createdEdges;
+  }
+
+  /**
+   * 2D segment-segment intersection (ignoring Y axis, using X and Z).
+   * Returns { t1, t2 } parameters along each segment, or null if no intersection.
+   * Both t1 and t2 must be in (epsilon, 1-epsilon) for a proper crossing.
+   */
+  private segmentIntersect2D(
+    a1: Vec3, a2: Vec3, b1: Vec3, b2: Vec3
+  ): { t1: number; t2: number } | null {
+    // Use the plane with the largest projected area for numerical stability
+    const aNorm = vec3.cross(vec3.sub(a2, a1), vec3.sub(b2, b1));
+    const absX = Math.abs(aNorm.x), absY = Math.abs(aNorm.y), absZ = Math.abs(aNorm.z);
+
+    let u1: number, v1_: number, u2: number, v2_: number;
+    let u3: number, v3: number, u4: number, v4: number;
+
+    if (absY >= absX && absY >= absZ) {
+      // Project onto XZ plane (most common for ground-plane geometry)
+      u1 = a1.x; v1_ = a1.z; u2 = a2.x; v2_ = a2.z;
+      u3 = b1.x; v3 = b1.z; u4 = b2.x; v4 = b2.z;
+    } else if (absX >= absZ) {
+      // Project onto YZ plane
+      u1 = a1.y; v1_ = a1.z; u2 = a2.y; v2_ = a2.z;
+      u3 = b1.y; v3 = b1.z; u4 = b2.y; v4 = b2.z;
+    } else {
+      // Project onto XY plane
+      u1 = a1.x; v1_ = a1.y; u2 = a2.x; v2_ = a2.y;
+      u3 = b1.x; v3 = b1.y; u4 = b2.x; v4 = b2.y;
+    }
+
+    const d1u = u2 - u1, d1v = v2_ - v1_;
+    const d2u = u4 - u3, d2v = v4 - v3;
+
+    const denom = d1u * d2v - d1v * d2u;
+    if (Math.abs(denom) < 1e-10) return null; // Parallel or collinear
+
+    const du = u3 - u1, dv = v3 - v1_;
+    const t1 = (du * d2v - dv * d2u) / denom;
+    const t2 = (du * d1v - dv * d1u) / denom;
+
+    const EPS = 0.001;
+    if (t1 < EPS || t1 > 1 - EPS || t2 < EPS || t2 > 1 - EPS) return null;
+
+    // Verify the segments are coplanar (within tolerance)
+    const int3d_a = vec3.add(a1, vec3.mul(vec3.sub(a2, a1), t1));
+    const int3d_b = vec3.add(b1, vec3.mul(vec3.sub(b2, b1), t2));
+    if (vec3.distance(int3d_a, int3d_b) > 0.1) return null; // Not coplanar
+
+    return { t1, t2 };
+  }
+
+  /**
    * Find a face whose boundary contains both v1 and v2 (but they're not adjacent).
    * This means the new edge would bisect the face.
    */
@@ -169,7 +331,7 @@ export class GeometryEngine implements IGeometryEngine {
   private autoCreateFaces(v1Id: string, v2Id: string): void {
     // Find ALL short coplanar loops that include the new edge.
     // BFS from v2 to v1 through other edges, collecting all paths.
-    const maxDepth = 12;
+    const maxDepth = 20;
 
     const findAllLoops = (startId: string, targetId: string): string[][] => {
       const loops: string[][] = [];
@@ -192,7 +354,7 @@ export class GeometryEngine implements IGeometryEngine {
 
           if (neighborId === targetId && path.length >= 2) {
             loops.push([...path, targetId]);
-            continue; // Don't stop — keep finding more loops
+            continue;
           }
 
           if (!path.includes(neighborId)) {
@@ -204,6 +366,9 @@ export class GeometryEngine implements IGeometryEngine {
     };
 
     const loops = findAllLoops(v2Id, v1Id);
+
+    // Sort by length (shortest first) — minimal loops are the real faces
+    loops.sort((a, b) => a.length - b.length);
 
     for (const loop of loops) {
       if (loop.length < 3) continue;
@@ -218,6 +383,22 @@ export class GeometryEngine implements IGeometryEngine {
         }
       }
       if (exists) continue;
+
+      // MINIMAL LOOP CHECK: skip this loop if any two non-adjacent vertices
+      // have an edge between them (a "chord"). If a chord exists, this loop
+      // contains smaller sub-loops and is not a minimal face.
+      let hasChord = false;
+      for (let i = 0; i < loop.length && !hasChord; i++) {
+        for (let j = i + 2; j < loop.length; j++) {
+          // Skip adjacent pair (last and first are also adjacent)
+          if (i === 0 && j === loop.length - 1) continue;
+          if (this.mesh.findEdgeBetween(loop[i], loop[j])) {
+            hasChord = true;
+            break;
+          }
+        }
+      }
+      if (hasChord) continue;
 
       try {
         this.createFace(loop);
@@ -542,6 +723,14 @@ export class GeometryEngine implements IGeometryEngine {
 
   findEdgeBetween(v1Id: string, v2Id: string): IEdge | undefined {
     return this.mesh.findEdgeBetween(v1Id, v2Id);
+  }
+
+  getCurveEdges(curveId: string): IEdge[] {
+    const edges: IEdge[] = [];
+    for (const [, edge] of this.mesh.edges) {
+      if (edge.curveId === curveId) edges.push(edge);
+    }
+    return edges;
   }
 
   // ─── Geometry computations ─────────────────────────────────────
@@ -903,6 +1092,8 @@ export class GeometryEngine implements IGeometryEngine {
       pushU8(e.selected ? 1 : 0);
       pushU8(e.hidden ? 1 : 0);
       pushI32(e.materialIndex);
+      pushU8(e.curveId ? 1 : 0);
+      if (e.curveId) pushString(e.curveId);
     }
 
     // Faces
@@ -921,6 +1112,9 @@ export class GeometryEngine implements IGeometryEngine {
       pushU8(f.selected ? 1 : 0);
       pushU8(f.hidden ? 1 : 0);
       pushF64(f.area);
+      const holes = f.holeStartIndices || [];
+      pushU32(holes.length);
+      for (const hi of holes) pushU32(hi);
     }
 
     // Half-edges
@@ -1029,7 +1223,11 @@ export class GeometryEngine implements IGeometryEngine {
       const hidden = readU8() === 1;
       const materialIndex = readI32();
 
+      const hasCurveId = readU8() === 1;
+      const curveId = hasCurveId ? readString() : undefined;
+
       const e: IEdge = { id, startVertexId, endVertexId, soft, smooth, selected, hidden, materialIndex };
+      if (curveId) e.curveId = curveId;
       this.mesh.edges.set(id, e);
     }
 
@@ -1050,6 +1248,9 @@ export class GeometryEngine implements IGeometryEngine {
       const selected = readU8() === 1;
       const hidden = readU8() === 1;
       const area = readF64();
+      const numHoles = readU32();
+      const holeStartIndices: number[] = [];
+      for (let j = 0; j < numHoles; j++) holeStartIndices.push(readU32());
 
       const normal: Vec3 = { x: nx, y: ny, z: nz };
       const f: IFace = {
@@ -1057,6 +1258,7 @@ export class GeometryEngine implements IGeometryEngine {
         plane: { normal: { ...normal }, distance: planeDist },
         materialIndex, backMaterialIndex, selected, hidden, area,
       };
+      if (holeStartIndices.length > 0) f.holeStartIndices = holeStartIndices;
       this.mesh.faces.set(id, f);
     }
 

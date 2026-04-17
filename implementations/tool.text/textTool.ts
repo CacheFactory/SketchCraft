@@ -150,14 +150,8 @@ export class TextTool extends BaseTool {
     try {
       for (const shape of shapes) {
         const outerPoints = shape.getPoints(4);
-        this.createShapeContour(outerPoints, origin);
-
-        if (shape.holes) {
-          for (const hole of shape.holes) {
-            const holePoints = hole.getPoints(4);
-            this.createShapeContour(holePoints, origin);
-          }
-        }
+        const holes = (shape.holes || []).map(h => h.getPoints(4));
+        this.createShapeWithHoles(outerPoints, holes, origin);
       }
       this.commitTransaction();
     } catch (e) {
@@ -166,10 +160,8 @@ export class TextTool extends BaseTool {
     }
   }
 
-  private createShapeContour(points: Array<{ x: number; y: number }>, origin: Vec3): void {
-    if (points.length < 3) return;
-
-    // Deduplicate close points to avoid zero-length edges
+  private filterPoints(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+    if (points.length < 2) return points;
     const filtered: Array<{ x: number; y: number }> = [points[0]];
     for (let i = 1; i < points.length; i++) {
       const prev = filtered[filtered.length - 1];
@@ -179,32 +171,61 @@ export class TextTool extends BaseTool {
         filtered.push(points[i]);
       }
     }
-    if (filtered.length < 3) return;
+    return filtered;
+  }
+
+  private createShapeWithHoles(
+    outerPoints: Array<{ x: number; y: number }>,
+    holes: Array<Array<{ x: number; y: number }>>,
+    origin: Vec3,
+  ): void {
+    const outer = this.filterPoints(outerPoints);
+    if (outer.length < 3) return;
 
     const geo = this.document.geometry;
-    const vertexIds: string[] = [];
+    const allVertexIds: string[] = [];
+    const holeStartIndices: number[] = [];
 
-    for (const pt of filtered) {
-      const worldPos: Vec3 = {
-        x: origin.x + pt.x,
-        y: origin.y,
-        z: origin.z - pt.y,
-      };
-      const v = this.findOrCreateVertex(worldPos);
-      vertexIds.push(v.id);
-    }
-
-    // Create edges
-    for (let i = 0; i < vertexIds.length; i++) {
-      const next = (i + 1) % vertexIds.length;
-      if (vertexIds[i] !== vertexIds[next]) {
-        geo.createEdge(vertexIds[i], vertexIds[next]);
+    // Helper to create vertices and edges for a contour
+    const addContour = (points: Array<{ x: number; y: number }>) => {
+      const startIdx = allVertexIds.length;
+      for (const pt of points) {
+        const worldPos: Vec3 = {
+          x: origin.x + pt.x,
+          y: origin.y,
+          z: origin.z - pt.y,
+        };
+        const v = this.findOrCreateVertex(worldPos);
+        allVertexIds.push(v.id);
       }
+      // Create edges for this contour
+      const count = points.length;
+      for (let i = 0; i < count; i++) {
+        const a = startIdx + i;
+        const b = startIdx + (i + 1) % count;
+        if (allVertexIds[a] !== allVertexIds[b]) {
+          geo.createEdge(allVertexIds[a], allVertexIds[b]);
+        }
+      }
+    };
+
+    // Add outer contour
+    addContour(outer);
+
+    // Add hole contours
+    for (const hole of holes) {
+      const filtered = this.filterPoints(hole);
+      if (filtered.length < 3) continue;
+      holeStartIndices.push(allVertexIds.length);
+      addContour(filtered);
     }
 
-    // Create face
-    if (vertexIds.length >= 3) {
-      geo.createFace(vertexIds);
+    // Create single face with hole metadata
+    if (allVertexIds.length >= 3) {
+      const face = geo.createFace(allVertexIds);
+      if (holeStartIndices.length > 0) {
+        face.holeStartIndices = holeStartIndices;
+      }
     }
   }
 }

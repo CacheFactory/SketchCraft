@@ -47,6 +47,7 @@ export class WebGLRenderer implements IRenderer {
   private _preSelectionOutline: THREE.Group;
   private _selectedEntityIds: Set<string> = new Set();
   private _preSelectionEntityId: string | null = null;
+  private _preSelectionEntityIds: Set<string> = new Set();
 
   // Entity-to-object map (populated externally)
   private _entityObjects: EntityObjectMap = new Map();
@@ -276,19 +277,29 @@ export class WebGLRenderer implements IRenderer {
   }
 
   setPreSelectionHighlight(entityId: string | null): void {
-    // Restore previous pre-selection
-    if (this._preSelectionEntityId && this._preSelectionEntityId !== entityId) {
-      const prevObj = this._entityObjects.get(this._preSelectionEntityId);
-      if (prevObj && !this._selectedEntityIds.has(this._preSelectionEntityId)) {
-        this._restoreObject(prevObj);
+    this.setPreSelectionHighlightMulti(entityId ? [entityId] : []);
+  }
+
+  setPreSelectionHighlightMulti(entityIds: string[]): void {
+    // Restore previous pre-selection entities
+    for (const prevId of this._preSelectionEntityIds) {
+      if (!entityIds.includes(prevId)) {
+        const prevObj = this._entityObjects.get(prevId);
+        if (prevObj && !this._selectedEntityIds.has(prevId)) {
+          this._restoreObject(prevObj);
+        }
       }
     }
-    this._preSelectionEntityId = entityId;
 
-    if (entityId && !this._selectedEntityIds.has(entityId)) {
-      const obj = this._entityObjects.get(entityId);
-      if (obj) {
-        this._applyHighlight(obj, 'preselection');
+    this._preSelectionEntityIds = new Set(entityIds);
+    this._preSelectionEntityId = entityIds.length > 0 ? entityIds[0] : null;
+
+    for (const id of entityIds) {
+      if (!this._selectedEntityIds.has(id)) {
+        const obj = this._entityObjects.get(id);
+        if (obj) {
+          this._applyHighlight(obj, 'preselection');
+        }
       }
     }
   }

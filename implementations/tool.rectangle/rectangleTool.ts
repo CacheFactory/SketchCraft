@@ -231,16 +231,16 @@ export class RectangleTool extends BaseTool {
       return;
     }
 
-    const v1 = this.document.geometry.createVertex(p1);
-    const v2 = this.document.geometry.createVertex(p2);
-    const v3 = this.document.geometry.createVertex(p3);
-    const v4 = this.document.geometry.createVertex(p4);
+    const v1 = this.findOrCreateVertex(p1);
+    const v2 = this.findOrCreateVertex(p2);
+    const v3 = this.findOrCreateVertex(p3);
+    const v4 = this.findOrCreateVertex(p4);
 
-    this.document.geometry.createEdge(v1.id, v2.id);
-    this.document.geometry.createEdge(v2.id, v3.id);
-    this.document.geometry.createEdge(v3.id, v4.id);
-    this.document.geometry.createEdge(v4.id, v1.id);
-    this.document.geometry.createFace([v1.id, v2.id, v3.id, v4.id]);
+    // Use createEdgeWithIntersection to detect and split existing face boundaries
+    this.document.geometry.createEdgeWithIntersection(v1.id, v2.id);
+    this.document.geometry.createEdgeWithIntersection(v2.id, v3.id);
+    this.document.geometry.createEdgeWithIntersection(v3.id, v4.id);
+    this.document.geometry.createEdgeWithIntersection(v4.id, v1.id);
 
     this.commitTransaction();
     this.reset();

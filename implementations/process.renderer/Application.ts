@@ -233,22 +233,23 @@ export class Application implements IApplication {
     // Update 3D selection highlights
     this.viewport.renderer.setSelectionHighlight(highlightIds);
 
-    // Pre-selection: also resolve component IDs
-    let preSelId = sel.state.preSelectionId;
+    // Pre-selection: resolve all pre-selected IDs (supports curve multi-select)
+    const preSelIds = (sel as any).getPreSelectionIds?.() ?? (sel.state.preSelectionId ? [sel.state.preSelectionId] : []);
     const preSelHighlightIds: string[] = [];
-    if (preSelId && sm?.components?.has(preSelId)) {
-      const comp = sm.components.get(preSelId);
-      if (comp) {
-        for (const eid of comp.entityIds) preSelHighlightIds.push(eid);
+    for (const pid of preSelIds) {
+      if (sm?.components?.has(pid)) {
+        const comp = sm.components.get(pid);
+        if (comp) {
+          for (const eid of comp.entityIds) preSelHighlightIds.push(eid);
+        }
+      } else {
+        preSelHighlightIds.push(pid);
       }
-      // Highlight all component members as pre-selection
-      this.viewport.renderer.setPreSelectionHighlight(null);
-      for (const eid of preSelHighlightIds) {
-        const obj = (this.viewport.renderer as any)._entityObjects?.get(eid);
-        if (obj) (this.viewport.renderer as any)._applyHighlight(obj, 'preselection');
-      }
+    }
+    if ((this.viewport.renderer as any).setPreSelectionHighlightMulti) {
+      (this.viewport.renderer as any).setPreSelectionHighlightMulti(preSelHighlightIds);
     } else {
-      this.viewport.renderer.setPreSelectionHighlight(preSelId);
+      this.viewport.renderer.setPreSelectionHighlight(preSelHighlightIds[0] ?? null);
     }
 
     return { entityIds: ids, count: ids.length };

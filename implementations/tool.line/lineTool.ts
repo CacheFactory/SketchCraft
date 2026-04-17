@@ -67,7 +67,7 @@ export class LineTool extends BaseTool {
       this.vertexIds.push(vertex.id);
 
       try {
-        this.document.geometry.createEdgeWithAutoFace(prevId, vertex.id);
+        this.document.geometry.createEdgeWithIntersection(prevId, vertex.id);
       } catch {
         // Edge creation failed (degenerate) — remove the vertex and skip
         this.vertexIds.pop();
@@ -215,7 +215,7 @@ export class LineTool extends BaseTool {
     const vertex = this.findOrCreateVertex(targetPoint);
     this.vertexIds.push(vertex.id);
     const prevId = this.vertexIds[this.vertexIds.length - 2];
-    this.document.geometry.createEdgeWithAutoFace(prevId, vertex.id);
+    this.document.geometry.createEdgeWithIntersection(prevId, vertex.id);
     this.points.push(targetPoint);
 
     if (this.points.length >= 3 && vec3.distance(targetPoint, this.points[0]) < 0.01) {

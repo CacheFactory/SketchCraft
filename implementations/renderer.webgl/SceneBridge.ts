@@ -2,6 +2,7 @@
 // Synchronizes the geometry engine's B-Rep data with Three.js scene objects.
 
 import * as THREE from 'three';
+import { Earcut } from 'three/src/extras/Earcut.js';
 import type { IGeometryEngine, IFace, IEdge, ISceneManager, IMaterialManager } from '../../src/core/interfaces';
 import type { WebGLRenderer } from './WebGLRenderer';
 import type { SceneManager } from '../data.scene/SceneManager';
@@ -187,43 +188,61 @@ export class SceneBridge {
     }
 
     // --- Batch all faces into one merged BufferGeometry ---
-    // First pass: count total triangles to pre-allocate
+    // First pass: earcut each face to get accurate triangle count
+    const faceTriData: Array<{ indices: number[]; verts: Array<{ position: { x: number; y: number; z: number } }>; normal: { x: number; y: number; z: number }; id: string }> = [];
     let totalTriangles = 0;
-    mesh.faces.forEach((face) => {
-      const vertCount = face.vertexIds.length;
-      if (vertCount >= 3) totalTriangles += vertCount - 2;
-    });
-
-    const posArr = new Float32Array(totalTriangles * 3 * 3);
-    const normArr = new Float32Array(totalTriangles * 3 * 3);
-    let triOffset = 0;
 
     mesh.faces.forEach((face, id) => {
       const verts = this.engine.getFaceVertices(id);
       if (verts.length < 3) return;
 
       const n = face.normal;
+      // Project to 2D for earcut
+      const p0 = verts[0].position;
+      const p1 = verts[1].position;
+      let eux = p1.x - p0.x, euy = p1.y - p0.y, euz = p1.z - p0.z;
+      const euLen = Math.sqrt(eux * eux + euy * euy + euz * euz) || 1;
+      eux /= euLen; euy /= euLen; euz /= euLen;
+      let evx = n.y * euz - n.z * euy, evy = n.z * eux - n.x * euz, evz = n.x * euy - n.y * eux;
+      const evLen = Math.sqrt(evx * evx + evy * evy + evz * evz) || 1;
+      evx /= evLen; evy /= evLen; evz /= evLen;
 
-      // Fan triangulation
-      for (let i = 1; i < verts.length - 1; i++) {
-        const tri = [verts[0], verts[i], verts[i + 1]];
-        for (const v of tri) {
-          const base = triOffset * 3;
-          posArr[base] = v.position.x;
-          posArr[base + 1] = v.position.y;
-          posArr[base + 2] = v.position.z;
-          normArr[base] = n.x;
-          normArr[base + 1] = n.y;
-          normArr[base + 2] = n.z;
-          triOffset++;
-        }
+      const flat2d: number[] = [];
+      for (const v of verts) {
+        const dx = v.position.x - p0.x, dy = v.position.y - p0.y, dz = v.position.z - p0.z;
+        flat2d.push(dx * eux + dy * euy + dz * euz, dx * evx + dy * evy + dz * evz);
+      }
+      let indices = Earcut.triangulate(flat2d, undefined, 2);
+      if (indices.length === 0) {
+        indices = [];
+        for (let i = 1; i < verts.length - 1; i++) indices.push(0, i, i + 1);
+      }
+      totalTriangles += indices.length / 3;
+      faceTriData.push({ indices, verts, normal: n, id });
+    });
+
+    const posArr = new Float32Array(totalTriangles * 3 * 3);
+    const normArr = new Float32Array(totalTriangles * 3 * 3);
+    let triOffset = 0;
+
+    for (const { indices, verts, normal: n, id } of faceTriData) {
+      for (let i = 0; i < indices.length; i++) {
+        const v = verts[indices[i]];
+        const base = triOffset * 3;
+        posArr[base] = v.position.x;
+        posArr[base + 1] = v.position.y;
+        posArr[base + 2] = v.position.z;
+        normArr[base] = n.x;
+        normArr[base + 1] = n.y;
+        normArr[base + 2] = n.z;
+        triOffset++;
       }
 
       // Auto-assign to active layer
       if (this.sceneManager && !this.sceneManager.geometryLayerMap.has(id)) {
         this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
       }
-    });
+    }
 
     console.log(`[syncBatched] Built ${totalTriangles} triangles`);
 
@@ -443,25 +462,42 @@ export class SceneBridge {
     vx /= vLen; vy /= vLen; vz /= vLen;
     const uvScale = 1.0; // 1 texture repeat per meter
 
-    // Build triangle geometry (fan triangulation)
+    // Triangulate using ear-clipping (handles non-convex polygons like text)
+    // Project 3D vertices to 2D using the face's UV basis
+    const flat2d: number[] = [];
+    for (const v of verts) {
+      const dx = v.position.x - p0.x;
+      const dy = v.position.y - p0.y;
+      const dz = v.position.z - p0.z;
+      flat2d.push(dx * ux + dy * uy + dz * uz, dx * vx + dy * vy + dz * vz);
+    }
+    const holeIndices = face.holeStartIndices && face.holeStartIndices.length > 0
+      ? face.holeStartIndices : undefined;
+    let triIndices = Earcut.triangulate(flat2d, holeIndices, 2);
+
+    // Fallback to fan triangulation if earcut fails
+    if (triIndices.length === 0) {
+      triIndices = [];
+      for (let i = 1; i < verts.length - 1; i++) {
+        triIndices.push(0, i, i + 1);
+      }
+    }
+
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
 
-    for (let i = 1; i < verts.length - 1; i++) {
-      const tri = [verts[0], verts[i], verts[i + 1]];
-      for (const v of tri) {
-        positions.push(v.position.x + nx, v.position.y + ny, v.position.z + nz);
-        normals.push(n.x, n.y, n.z);
-        // UV relative to face origin (first vertex)
-        const dx = v.position.x - p0.x;
-        const dy = v.position.y - p0.y;
-        const dz = v.position.z - p0.z;
-        uvs.push(
-          (dx * ux + dy * uy + dz * uz) * uvScale,
-          (dx * vx + dy * vy + dz * vz) * uvScale,
-        );
-      }
+    for (let i = 0; i < triIndices.length; i++) {
+      const v = verts[triIndices[i]];
+      positions.push(v.position.x + nx, v.position.y + ny, v.position.z + nz);
+      normals.push(n.x, n.y, n.z);
+      const dx = v.position.x - p0.x;
+      const dy = v.position.y - p0.y;
+      const dz = v.position.z - p0.z;
+      uvs.push(
+        (dx * ux + dy * uy + dz * uz) * uvScale,
+        (dx * vx + dy * vy + dz * vz) * uvScale,
+      );
     }
 
     const geometry = new THREE.BufferGeometry();
