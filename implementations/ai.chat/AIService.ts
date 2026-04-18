@@ -1,7 +1,7 @@
 // @archigraph ai.chat
 // AI service — builds context, defines tools, and executes tool calls against ModelAPI
 
-import type { IModelAPI, ShapeResult, FaceInfo, MeasureResult, EntityInfo } from '../api.model/ModelAPI';
+import type { IModelAPI, ShapeResult, FaceInfo, EdgeInfo, MeasureResult, EntityInfo } from '../api.model/ModelAPI';
 import type { Vec3, Color, BoundingBox } from '../../src/core/types';
 
 // ─── Message Types ───────────────────────────────────────────────
@@ -383,6 +383,233 @@ export function getToolDefinitions() {
         required: ['center', 'radius', 'height', 'thickness'],
       },
     },
+    // ── Edge Operations ──
+    {
+      name: 'chamferEdge',
+      description: 'Chamfer (bevel) a sharp edge, replacing it with a flat angled cut. The edge must have exactly 2 adjacent faces.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          edgeId: { type: 'string' as const, description: 'Edge to chamfer' },
+          distance: { type: 'number' as const, description: 'Chamfer distance from the edge' },
+        },
+        required: ['edgeId', 'distance'],
+      },
+    },
+    {
+      name: 'filletEdge',
+      description: 'Fillet (round) a sharp edge with a smooth arc of faces. The edge must have exactly 2 adjacent faces.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          edgeId: { type: 'string' as const, description: 'Edge to fillet' },
+          radius: { type: 'number' as const, description: 'Fillet radius' },
+          segments: { type: 'number' as const, description: 'Arc smoothness (default 8)' },
+        },
+        required: ['edgeId', 'radius'],
+      },
+    },
+    // ── Face Operations ──
+    {
+      name: 'offsetFace',
+      description: 'Offset a face boundary inward or outward within its plane, creating connecting ring faces. Positive = inset, negative = outset. More precise than insetFace.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          faceId: { type: 'string' as const },
+          distance: { type: 'number' as const, description: 'Offset distance (positive = inset, negative = outset)' },
+        },
+        required: ['faceId', 'distance'],
+      },
+    },
+    {
+      name: 'subdivideFaces',
+      description: 'Subdivide faces into smaller sub-faces for mesh refinement or smooth surfaces.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          faceIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Faces to subdivide (empty = all)' },
+          method: { type: 'string' as const, enum: ['midpoint', 'catmull-clark'], description: 'Subdivision method (default: midpoint)' },
+          iterations: { type: 'number' as const, description: 'Number of subdivision passes (default: 1)' },
+        },
+        required: ['faceIds'],
+      },
+    },
+    {
+      name: 'triangulateFaces',
+      description: 'Convert polygon faces into triangles. Useful for export or rendering.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          faceIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Faces to triangulate (empty = all non-triangles)' },
+        },
+        required: ['faceIds'],
+      },
+    },
+    // ── Sweep ──
+    {
+      name: 'sweep',
+      description: 'Sweep a profile face along a path of connected edges (follow-me). Creates a 3D solid by extruding the profile along the path. Great for moldings, railings, gutters, and complex curved forms.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          profileFaceId: { type: 'string' as const, description: 'The face to use as the sweep profile' },
+          pathEdgeIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Ordered edge IDs forming the sweep path' },
+          alignToPath: { type: 'boolean' as const, description: 'Rotate profile to follow path curvature (default: true)' },
+        },
+        required: ['profileFaceId', 'pathEdgeIds'],
+      },
+    },
+    // ── Boolean CSG ──
+    {
+      name: 'booleanUnion',
+      description: 'CSG Union: merge two sets of faces into one solid, removing internal geometry. Both regions must be closed solids.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          regionAIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the first solid' },
+          regionBIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the second solid' },
+        },
+        required: ['regionAIds', 'regionBIds'],
+      },
+    },
+    {
+      name: 'booleanSubtract',
+      description: 'CSG Subtract: cut the volume of solid B out of solid A. Use for carving holes, niches, or complex cutouts.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          regionAIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the solid to subtract FROM' },
+          regionBIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the solid to subtract' },
+        },
+        required: ['regionAIds', 'regionBIds'],
+      },
+    },
+    {
+      name: 'booleanIntersect',
+      description: 'CSG Intersect: keep only the overlapping volume of two solids.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          regionAIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the first solid' },
+          regionBIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Face IDs of the second solid' },
+        },
+        required: ['regionAIds', 'regionBIds'],
+      },
+    },
+    // ── Advanced Queries ──
+    {
+      name: 'getEdgeInfo',
+      description: 'Get information about an edge: length, start/end vertex positions, midpoint, and adjacent face IDs.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          edgeId: { type: 'string' as const },
+        },
+        required: ['edgeId'],
+      },
+    },
+    {
+      name: 'getConnectedFaces',
+      description: 'Get all faces that share an edge with the given face (adjacent/neighboring faces).',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          faceId: { type: 'string' as const },
+        },
+        required: ['faceId'],
+      },
+    },
+    {
+      name: 'getEdgeFaces',
+      description: 'Get the faces adjacent to an edge (0, 1, or 2 faces).',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          edgeId: { type: 'string' as const },
+        },
+        required: ['edgeId'],
+      },
+    },
+    // ── Section Plane ──
+    {
+      name: 'setSectionPlane',
+      description: 'Set a section cutting plane to see inside the model. The plane is defined by a point and a normal direction.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          point: { type: 'object' as const, properties: { x: { type: 'number' as const }, y: { type: 'number' as const }, z: { type: 'number' as const } }, required: ['x', 'y', 'z'] },
+          normal: { type: 'object' as const, properties: { x: { type: 'number' as const }, y: { type: 'number' as const }, z: { type: 'number' as const } }, required: ['x', 'y', 'z'] },
+        },
+        required: ['point', 'normal'],
+      },
+    },
+    {
+      name: 'clearSectionPlane',
+      description: 'Remove the section cutting plane to show the full model.',
+      input_schema: { type: 'object' as const, properties: {} },
+    },
+    // ── Groups ──
+    {
+      name: 'createGroup',
+      description: 'Group entities together into a named group for organization. Groups can be entered/exited for editing.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          name: { type: 'string' as const, description: 'Display name for the group' },
+          entityIds: { type: 'array' as const, items: { type: 'string' as const }, description: 'Entity IDs to include in the group' },
+        },
+        required: ['name', 'entityIds'],
+      },
+    },
+    // ── Materials (extended) ──
+    {
+      name: 'createMaterial',
+      description: 'Create a named material with color and PBR properties (opacity, roughness, metalness).',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          name: { type: 'string' as const },
+          color: { type: 'object' as const, properties: { r: { type: 'number' as const }, g: { type: 'number' as const }, b: { type: 'number' as const } }, required: ['r', 'g', 'b'] },
+          opacity: { type: 'number' as const, description: '0-1, default 1' },
+          roughness: { type: 'number' as const, description: '0-1, default 0.5' },
+          metalness: { type: 'number' as const, description: '0-1, default 0' },
+        },
+        required: ['name', 'color'],
+      },
+    },
+    // ── Selection (extended) ──
+    {
+      name: 'selectAll',
+      description: 'Select all entities in the model.',
+      input_schema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'getSelectedEntities',
+      description: 'Get the currently selected entity IDs, categorized by type (faces, edges, vertices).',
+      input_schema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'getAllFaces',
+      description: 'Get all face IDs in the model.',
+      input_schema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'getAllEdges',
+      description: 'Get all edge IDs in the model.',
+      input_schema: { type: 'object' as const, properties: {} },
+    },
+    {
+      name: 'getVertexPosition',
+      description: 'Get the 3D position of a vertex by its ID.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          vertexId: { type: 'string' as const },
+        },
+        required: ['vertexId'],
+      },
+    },
     {
       name: 'batch',
       description: 'Execute multiple operations as a single undoable action. ALWAYS use this for multi-step builds (e.g. creating a building with walls + openings + roof).',
@@ -447,16 +674,24 @@ export function buildSystemPrompt(): string {
 - **Windows/Doors**: Use cutOpening on a wall face, then insetFace on the opening for a frame, then extrudeFace the frame inward for depth
 - **Roof**: Use createRoof on the top face with appropriate pitch and overhang
 - **Stairs**: Use createStairs with standard rise/tread dimensions
-- **Moldings/Trim**: insetFace then extrudeFace the inset slightly for relief detail
+- **Moldings/Trim**: Create a profile face, then sweep it along edges for crown molding, baseboards, railings
+- **Edge Detail**: chamferEdge for beveled edges, filletEdge for rounded edges — adds realism
 - **Arches**: Use createArch for doorways and windows
 - **Repetitive elements**: arrayLinear for evenly spaced windows, columns, balusters
 - **Symmetry**: Build one side, mirrorEntities for the other
+- **Boolean operations**: booleanSubtract to carve holes, booleanUnion to merge solids, booleanIntersect for overlap
+- **Sweep/Follow-me**: sweep a profile face along a path for gutters, cornices, complex profiles
+- **Section planes**: setSectionPlane to cut through the model for visualization
+- **Mesh refinement**: subdivideFaces for smoother surfaces, triangulateFaces for export
 
 ## Important
 - Face/edge/vertex IDs are strings like "f0", "e0", "v0" or UUIDs
 - RGB color values are 0-1 (not 0-255)
 - Extrude distance: positive = outward along face normal, negative = inward
-- Always use batch for multi-step operations so the user can undo with one Ctrl+Z`;
+- Always use batch for multi-step operations so the user can undo with one Ctrl+Z
+- Use getEdgeInfo and getConnectedFaces to explore model topology before operations
+- Use createMaterial for PBR materials (glass, metal, wood) with opacity/roughness/metalness
+- Use createGroup to organize parts of your model (walls, roof, furniture, etc.)`;
 }
 
 // ─── Selection Context Builder ───────────────────────────────────
@@ -674,6 +909,105 @@ export function executeTool(api: IModelAPI, name: string, input: Record<string, 
       }
       case 'listMaterials': {
         return JSON.stringify(api.listMaterials());
+      }
+      // ── Edge Operations ──
+      case 'chamferEdge': {
+        const r = api.chamferEdge(input.edgeId as string, input.distance as number);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds, edgeIds: r.edgeIds, vertexIds: r.vertexIds });
+      }
+      case 'filletEdge': {
+        const r = api.filletEdge(input.edgeId as string, input.radius as number, input.segments as number);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds, edgeIds: r.edgeIds, vertexIds: r.vertexIds });
+      }
+      // ── Face Operations ──
+      case 'offsetFace': {
+        const r = api.offsetFace(input.faceId as string, input.distance as number);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds, edgeIds: r.edgeIds, vertexIds: r.vertexIds });
+      }
+      case 'subdivideFaces': {
+        const r = api.subdivideFaces(
+          input.faceIds as string[],
+          input.method as 'midpoint' | 'catmull-clark' | undefined,
+          input.iterations as number | undefined,
+        );
+        return JSON.stringify({ ok: true, faceIds: r.faceIds.length, newFaces: r.faceIds });
+      }
+      case 'triangulateFaces': {
+        const r = api.triangulateFaces(input.faceIds as string[]);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds.length });
+      }
+      // ── Sweep ──
+      case 'sweep': {
+        const r = api.sweep(input.profileFaceId as string, input.pathEdgeIds as string[], input.alignToPath as boolean);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds.length, edgeIds: r.edgeIds.length });
+      }
+      // ── Boolean CSG ──
+      case 'booleanUnion': {
+        const r = api.booleanUnion(input.regionAIds as string[], input.regionBIds as string[]);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds });
+      }
+      case 'booleanSubtract': {
+        const r = api.booleanSubtract(input.regionAIds as string[], input.regionBIds as string[]);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds });
+      }
+      case 'booleanIntersect': {
+        const r = api.booleanIntersect(input.regionAIds as string[], input.regionBIds as string[]);
+        return JSON.stringify({ ok: true, faceIds: r.faceIds });
+      }
+      // ── Advanced Queries ──
+      case 'getEdgeInfo': {
+        const info = api.getEdgeInfo(input.edgeId as string);
+        return JSON.stringify(info || { error: 'Edge not found' });
+      }
+      case 'getConnectedFaces': {
+        const ids = api.getConnectedFaces(input.faceId as string);
+        return JSON.stringify({ faceIds: ids });
+      }
+      case 'getEdgeFaces': {
+        const ids = api.getEdgeFaces(input.edgeId as string);
+        return JSON.stringify({ faceIds: ids });
+      }
+      // ── Section Plane ──
+      case 'setSectionPlane': {
+        api.setSectionPlane(input.point as Vec3, input.normal as Vec3);
+        return JSON.stringify({ ok: true });
+      }
+      case 'clearSectionPlane': {
+        api.clearSectionPlane();
+        return JSON.stringify({ ok: true });
+      }
+      // ── Groups ──
+      case 'createGroup': {
+        const id = api.createGroup(input.name as string, input.entityIds as string[]);
+        return JSON.stringify({ ok: true, groupId: id });
+      }
+      // ── Materials (extended) ──
+      case 'createMaterial': {
+        const c = input.color as { r: number; g: number; b: number };
+        const id = api.createMaterial(input.name as string, c, {
+          opacity: input.opacity as number,
+          roughness: input.roughness as number,
+          metalness: input.metalness as number,
+        });
+        return JSON.stringify({ ok: true, materialId: id });
+      }
+      // ── Selection/Query (extended) ──
+      case 'selectAll': {
+        api.selectAll();
+        return JSON.stringify({ ok: true });
+      }
+      case 'getSelectedEntities': {
+        return JSON.stringify(api.getSelectedEntities());
+      }
+      case 'getAllFaces': {
+        return JSON.stringify({ faceIds: api.getAllFaces() });
+      }
+      case 'getAllEdges': {
+        return JSON.stringify({ edgeIds: api.getAllEdges() });
+      }
+      case 'getVertexPosition': {
+        const pos = api.getVertexPosition(input.vertexId as string);
+        return JSON.stringify(pos || { error: 'Vertex not found' });
       }
       case 'batch': {
         const ops = input.operations as Array<{ tool: string; input: Record<string, unknown> }>;

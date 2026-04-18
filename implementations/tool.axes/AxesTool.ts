@@ -140,17 +140,32 @@ export class AxesTool extends BaseTool {
   }
 
   private removeAxesVisual(): void {
-    if (!this.axesHelper) return;
-
     const overlayScene = (this.viewport.renderer as any).getOverlayScene?.() as THREE.Scene | undefined;
-    if (overlayScene) overlayScene.remove(this.axesHelper);
+    if (!overlayScene) return;
 
-    this.axesHelper.traverse(child => {
-      if (child instanceof THREE.Line) {
-        child.geometry.dispose();
-        (child.material as THREE.Material).dispose();
-      }
-    });
-    this.axesHelper = null;
+    // Remove by reference if we have it
+    if (this.axesHelper) {
+      overlayScene.remove(this.axesHelper);
+      this.axesHelper.traverse(child => {
+        if (child instanceof THREE.Line) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      });
+      this.axesHelper = null;
+    }
+
+    // Also remove any orphaned custom-axes groups (from tool deactivation/reactivation)
+    let orphan = overlayScene.getObjectByName('custom-axes');
+    while (orphan) {
+      overlayScene.remove(orphan);
+      orphan.traverse(child => {
+        if (child instanceof THREE.Line) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+      });
+      orphan = overlayScene.getObjectByName('custom-axes');
+    }
   }
 }

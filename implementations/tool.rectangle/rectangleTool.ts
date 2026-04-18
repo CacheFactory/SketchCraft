@@ -6,6 +6,7 @@ import type { Vec3, Plane } from '../../src/core/types';
 import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool, DRAWING_PLANES } from '../tool.select/BaseTool';
+import { customAxes } from '../tool.axes/CustomAxes';
 
 export class RectangleTool extends BaseTool {
   readonly id = 'tool.rectangle';
@@ -163,9 +164,30 @@ export class RectangleTool extends BaseTool {
     }
   }
 
-  /** Get two orthogonal axes on the current drawing plane. */
+  /** Get two orthogonal axes on the current drawing plane, respecting custom axes. */
   private getPlaneAxes(): { axis1: Vec3; axis2: Vec3 } {
     const n = this.drawPlane.normal;
+
+    if (customAxes.isCustom) {
+      const ca = customAxes.current!;
+      // Pick the two custom axes that are most perpendicular to the plane normal
+      const dotX = Math.abs(vec3.dot(n, ca.xAxis));
+      const dotY = Math.abs(vec3.dot(n, ca.yAxis));
+      const dotZ = Math.abs(vec3.dot(n, ca.zAxis));
+
+      if (dotY >= dotX && dotY >= dotZ) {
+        // Normal is closest to custom Y — use custom X and Z
+        return { axis1: { ...ca.xAxis }, axis2: { ...ca.zAxis } };
+      } else if (dotX >= dotY && dotX >= dotZ) {
+        // Normal is closest to custom X — use custom Z and Y
+        return { axis1: { ...ca.zAxis }, axis2: { ...ca.yAxis } };
+      } else {
+        // Normal is closest to custom Z — use custom X and Y
+        return { axis1: { ...ca.xAxis }, axis2: { ...ca.yAxis } };
+      }
+    }
+
+    // Default world axes
     if (Math.abs(n.y) > 0.9) {
       return { axis1: { x: 1, y: 0, z: 0 }, axis2: { x: 0, y: 0, z: 1 } };
     } else if (Math.abs(n.x) > 0.9) {

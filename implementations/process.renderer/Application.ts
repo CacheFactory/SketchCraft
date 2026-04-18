@@ -80,6 +80,7 @@ export class Application implements IApplication {
       this.document,
       () => this.syncScene(),
       this.viewport.camera,
+      this.viewport,
     );
 
     // Expose on window for plugins and dev console

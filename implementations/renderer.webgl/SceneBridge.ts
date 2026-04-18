@@ -708,9 +708,46 @@ export class SceneBridge {
       }
     }
 
+    // If we already found a vertex/midpoint/intersection snap, use it (higher priority)
     if (bestPoint) {
       this.showSnapMarker(bestPoint, camera);
       return bestPoint;
+    }
+
+    // On-edge snap: find the closest point on any edge to the cursor ray.
+    // Lower priority than point snaps — only used when no point snap is found.
+    const ray = camera.screenToRay(screenX, screenY, viewportWidth, viewportHeight);
+    if (ray) {
+      let bestEdgeDist = Infinity;
+      let bestEdgePoint: { x: number; y: number; z: number } | null = null;
+
+      mesh.edges.forEach((edge) => {
+        const v1 = mesh.vertices.get(edge.startVertexId);
+        const v2 = mesh.vertices.get(edge.endVertexId);
+        if (!v1 || !v2) return;
+
+        // Closest point between ray and edge segment
+        const p = this.closestPointOnSegmentToRay(
+          v1.position, v2.position, ray.origin, ray.direction,
+        );
+        if (!p) return;
+
+        // Check screen distance
+        const sp = camera.worldToScreen(p, viewportWidth, viewportHeight);
+        const dx = sp.x - screenX;
+        const dy = sp.y - screenY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < snapRadiusPx * 0.7 && dist < bestEdgeDist) {
+          bestEdgeDist = dist;
+          bestEdgePoint = p;
+        }
+      });
+
+      if (bestEdgePoint) {
+        this.showOnEdgeMarker(bestEdgePoint, camera);
+        return bestEdgePoint;
+      }
     }
 
     // No snap — show marker at cursor world position if available
@@ -720,6 +757,44 @@ export class SceneBridge {
       this.hideSnapMarker();
     }
     return worldPoint;
+  }
+
+  /**
+   * Find the closest point on a line segment (a->b) to a ray (origin + t*dir).
+   * Returns the point on the segment, or null if too far.
+   */
+  private closestPointOnSegmentToRay(
+    a: { x: number; y: number; z: number },
+    b: { x: number; y: number; z: number },
+    rayOrigin: { x: number; y: number; z: number },
+    rayDir: { x: number; y: number; z: number },
+  ): { x: number; y: number; z: number } | null {
+    // Edge direction
+    const edx = b.x - a.x, edy = b.y - a.y, edz = b.z - a.z;
+    // w = a - rayOrigin
+    const wx = a.x - rayOrigin.x, wy = a.y - rayOrigin.y, wz = a.z - rayOrigin.z;
+
+    const aa = rayDir.x * rayDir.x + rayDir.y * rayDir.y + rayDir.z * rayDir.z;
+    const bb = rayDir.x * edx + rayDir.y * edy + rayDir.z * edz;
+    const cc = edx * edx + edy * edy + edz * edz;
+    const dd = rayDir.x * wx + rayDir.y * wy + rayDir.z * wz;
+    const ee = edx * wx + edy * wy + edz * wz;
+
+    const denom = aa * cc - bb * bb;
+    if (Math.abs(denom) < 1e-10) return null; // Parallel
+
+    // s = parameter on edge segment (clamped to [0,1])
+    let s = (bb * dd - aa * ee) / denom;
+    s = Math.max(0, Math.min(1, s));
+
+    // Skip if very close to endpoints (those are already handled by vertex snap)
+    if (s < 0.05 || s > 0.95) return null;
+
+    return {
+      x: a.x + edx * s,
+      y: a.y + edy * s,
+      z: a.z + edz * s,
+    };
   }
 
   /** Scale snap marker so it appears constant size on screen regardless of zoom. */
@@ -746,6 +821,21 @@ export class SceneBridge {
 
     (this.snapMarkerDot.material as THREE.MeshBasicMaterial).color.setHex(0x00cc44);
     (this.snapMarkerRing.material as THREE.MeshBasicMaterial).color.setHex(0x00cc44);
+    this.snapMarkerRing.visible = true;
+  }
+
+  /** Show a red marker at an on-edge snap point. */
+  private showOnEdgeMarker(point: { x: number; y: number; z: number }, camera: any): void {
+    this.snapMarker.position.set(point.x, point.y, point.z);
+    this.snapMarker.visible = true;
+    this.snapActive = true;
+
+    const camPos = camera.position;
+    this.snapMarkerRing.lookAt(camPos.x, camPos.y, camPos.z);
+    this.scaleMarkerToCamera(point, camera);
+
+    (this.snapMarkerDot.material as THREE.MeshBasicMaterial).color.setHex(0xff4444);
+    (this.snapMarkerRing.material as THREE.MeshBasicMaterial).color.setHex(0xff4444);
     this.snapMarkerRing.visible = true;
   }
 

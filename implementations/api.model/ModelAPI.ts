@@ -8,7 +8,17 @@ import type {
   ICameraController,
 } from '../../src/core/interfaces';
 import type { Vec3, Color, BoundingBox, MaterialDef } from '../../src/core/types';
+import type { IViewport } from '../../src/core/interfaces';
 import { vec3, bbox, degToRad } from '../../src/core/math';
+import { ChamferOperation } from '../op.chamfer/ChamferOperation';
+import { FilletOperation } from '../op.fillet/FilletOperation';
+import { SweepOperation } from '../op.sweep/SweepOperation';
+import { OffsetOperation } from '../op.offset/OffsetOperation';
+import { SubdivideOperation } from '../op.subdivide/SubdivideOperation';
+import { TriangulateOperation } from '../op.triangulate/TriangulateOperation';
+import { BooleanUnion, MeshRegion } from '../op.boolean_union/BooleanUnion';
+import { BooleanSubtract } from '../op.boolean_subtract/BooleanSubtract';
+import { BooleanIntersect } from '../op.boolean_intersect/BooleanIntersect';
 
 // ─── Result Types ────────────────────────────────────────────────
 
@@ -30,6 +40,15 @@ export interface EntityInfo {
   faces: string[];
   edges: string[];
   vertices: string[];
+}
+
+export interface EdgeInfo {
+  id: string;
+  length: number;
+  startVertex: Vec3;
+  endVertex: Vec3;
+  midpoint: Vec3;
+  adjacentFaceIds: string[];
 }
 
 export interface MeasureResult {
@@ -96,6 +115,32 @@ export interface IModelAPI {
   setView(name: 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso'): void;
   zoomExtents(): void;
 
+  // Edge operations
+  chamferEdge(edgeId: string, distance: number): ShapeResult;
+  filletEdge(edgeId: string, radius: number, segments?: number): ShapeResult;
+
+  // Face operations
+  offsetFace(faceId: string, distance: number): ShapeResult;
+  subdivideFaces(faceIds: string[], method?: 'midpoint' | 'catmull-clark', iterations?: number): ShapeResult;
+  triangulateFaces(faceIds: string[]): ShapeResult;
+
+  // Sweep
+  sweep(profileFaceId: string, pathEdgeIds: string[], alignToPath?: boolean): ShapeResult;
+
+  // Boolean CSG
+  booleanUnion(regionAIds: string[], regionBIds: string[]): ShapeResult;
+  booleanSubtract(regionAIds: string[], regionBIds: string[]): ShapeResult;
+  booleanIntersect(regionAIds: string[], regionBIds: string[]): ShapeResult;
+
+  // Queries
+  getEdgeInfo(edgeId: string): EdgeInfo | null;
+  getConnectedFaces(faceId: string): string[];
+  getEdgeFaces(edgeId: string): string[];
+
+  // Section plane
+  setSectionPlane(point: Vec3, normal: Vec3): void;
+  clearSectionPlane(): void;
+
   // Groups
   createGroup(name: string, entityIds: string[]): string;
 
@@ -112,16 +157,19 @@ export class ModelAPI implements IModelAPI {
   private doc: IModelDocument;
   private syncScene: () => void;
   private camera: ICameraController;
+  private viewport: IViewport | null;
   private inBatch = false;
 
   constructor(
     doc: IModelDocument,
     syncScene: () => void,
     camera: ICameraController,
+    viewport?: IViewport,
   ) {
     this.doc = doc;
     this.syncScene = syncScene;
     this.camera = camera;
+    this.viewport = viewport || null;
   }
 
   private get geo(): IGeometryEngine { return this.doc.geometry; }
@@ -1157,6 +1205,198 @@ export class ModelAPI implements IModelAPI {
 
   zoomExtents(): void {
     this.camera.fitToBox(this.geo.getBoundingBox());
+  }
+
+  // ── Edge Operations ─────────────────────────────────────────
+
+  chamferEdge(edgeId: string, distance: number): ShapeResult {
+    return this.transact('Chamfer Edge', () => {
+      const op = new ChamferOperation();
+      const result = op.execute(this.geo, { edgeId, distance });
+      if (!result.success) throw new Error(result.error || 'Chamfer failed');
+      return {
+        faceIds: result.chamferFaceId ? [result.chamferFaceId] : [],
+        edgeIds: result.newEdgeIds,
+        vertexIds: result.newVertexIds,
+      };
+    });
+  }
+
+  filletEdge(edgeId: string, radius: number, segments = 8): ShapeResult {
+    return this.transact('Fillet Edge', () => {
+      const op = new FilletOperation();
+      const result = op.execute(this.geo, { edgeId, radius, segments });
+      if (!result.success) throw new Error(result.error || 'Fillet failed');
+      return {
+        faceIds: result.filletFaceIds,
+        edgeIds: result.newEdgeIds,
+        vertexIds: result.newVertexIds,
+      };
+    });
+  }
+
+  // ── Face Operations ────────────────────────────────────────
+
+  offsetFace(faceId: string, distance: number): ShapeResult {
+    return this.transact('Offset Face', () => {
+      const op = new OffsetOperation();
+      const result = op.execute(this.geo, { faceId, distance });
+      if (!result.success) throw new Error(result.error || 'Offset failed');
+      return {
+        faceIds: [...result.connectingFaceIds, ...(result.innerFaceId ? [result.innerFaceId] : [])],
+        edgeIds: result.newEdgeIds,
+        vertexIds: result.newVertexIds,
+      };
+    });
+  }
+
+  subdivideFaces(faceIds: string[], method: 'midpoint' | 'catmull-clark' = 'midpoint', iterations = 1): ShapeResult {
+    return this.transact('Subdivide', () => {
+      const op = new SubdivideOperation();
+      const result = op.execute(this.geo, { faceIds, method, iterations });
+      if (!result.success) throw new Error(result.error || 'Subdivide failed');
+      return {
+        faceIds: result.newFaceIds,
+        edgeIds: result.newEdgeIds,
+        vertexIds: result.newVertexIds,
+      };
+    });
+  }
+
+  triangulateFaces(faceIds: string[]): ShapeResult {
+    return this.transact('Triangulate', () => {
+      const op = new TriangulateOperation();
+      const result = op.execute(this.geo, { faceIds });
+      if (!result.success) throw new Error(result.error || 'Triangulate failed');
+      return {
+        faceIds: result.newFaceIds,
+        edgeIds: result.newEdgeIds,
+        vertexIds: [],
+      };
+    });
+  }
+
+  // ── Sweep ──────────────────────────────────────────────────
+
+  sweep(profileFaceId: string, pathEdgeIds: string[], alignToPath = true): ShapeResult {
+    return this.transact('Sweep', () => {
+      const op = new SweepOperation();
+      const result = op.execute(this.geo, { profileFaceId, pathEdgeIds, alignToPath });
+      if (!result.success) throw new Error(result.error || 'Sweep failed');
+      return {
+        faceIds: result.newFaceIds,
+        edgeIds: result.newEdgeIds,
+        vertexIds: result.newVertexIds,
+      };
+    });
+  }
+
+  // ── Boolean CSG ────────────────────────────────────────────
+
+  private buildRegion(entityIds: string[]): MeshRegion {
+    const faceIds: string[] = [];
+    const edgeIds: string[] = [];
+    const vertexIds: string[] = [];
+    const vids = new Set<string>();
+    for (const id of entityIds) {
+      const face = this.geo.getFace(id);
+      if (face) {
+        faceIds.push(id);
+        for (const vid of face.vertexIds) vids.add(vid);
+        const faceEdges = this.geo.getFaceEdges(id);
+        for (const e of faceEdges) edgeIds.push(e.id);
+        continue;
+      }
+      const edge = this.geo.getEdge(id);
+      if (edge) {
+        edgeIds.push(id);
+        vids.add(edge.startVertexId);
+        vids.add(edge.endVertexId);
+      }
+    }
+    vertexIds.push(...vids);
+    return { faceIds, edgeIds, vertexIds };
+  }
+
+  booleanUnion(regionAIds: string[], regionBIds: string[]): ShapeResult {
+    return this.transact('Boolean Union', () => {
+      const op = new BooleanUnion();
+      const result = op.execute(this.geo, {
+        regionA: this.buildRegion(regionAIds),
+        regionB: this.buildRegion(regionBIds),
+      });
+      if (!result.success) throw new Error(result.error || 'Boolean union failed');
+      return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
+    });
+  }
+
+  booleanSubtract(regionAIds: string[], regionBIds: string[]): ShapeResult {
+    return this.transact('Boolean Subtract', () => {
+      const op = new BooleanSubtract();
+      const result = op.execute(this.geo, {
+        regionA: this.buildRegion(regionAIds),
+        regionB: this.buildRegion(regionBIds),
+      });
+      if (!result.success) throw new Error(result.error || 'Boolean subtract failed');
+      return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
+    });
+  }
+
+  booleanIntersect(regionAIds: string[], regionBIds: string[]): ShapeResult {
+    return this.transact('Boolean Intersect', () => {
+      const op = new BooleanIntersect();
+      const result = op.execute(this.geo, {
+        regionA: this.buildRegion(regionAIds),
+        regionB: this.buildRegion(regionBIds),
+      });
+      if (!result.success) throw new Error(result.error || 'Boolean intersect failed');
+      return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
+    });
+  }
+
+  // ── Advanced Queries ───────────────────────────────────────
+
+  getEdgeInfo(edgeId: string): EdgeInfo | null {
+    const edge = this.geo.getEdge(edgeId);
+    if (!edge) return null;
+    const v1 = this.geo.getVertex(edge.startVertexId);
+    const v2 = this.geo.getVertex(edge.endVertexId);
+    if (!v1 || !v2) return null;
+    const adjacentFaces = this.geo.getEdgeFaces(edgeId);
+    return {
+      id: edgeId,
+      length: this.geo.computeEdgeLength(edgeId),
+      startVertex: { ...v1.position },
+      endVertex: { ...v2.position },
+      midpoint: {
+        x: (v1.position.x + v2.position.x) / 2,
+        y: (v1.position.y + v2.position.y) / 2,
+        z: (v1.position.z + v2.position.z) / 2,
+      },
+      adjacentFaceIds: adjacentFaces.map(f => f.id),
+    };
+  }
+
+  getConnectedFaces(faceId: string): string[] {
+    return this.geo.getConnectedFaces(faceId).map(f => f.id);
+  }
+
+  getEdgeFaces(edgeId: string): string[] {
+    return this.geo.getEdgeFaces(edgeId).map(f => f.id);
+  }
+
+  // ── Section Plane ──────────────────────────────────────────
+
+  setSectionPlane(point: Vec3, normal: Vec3): void {
+    if (this.viewport) {
+      this.viewport.renderer.setSectionPlane({ point, normal: vec3.normalize(normal) });
+    }
+  }
+
+  clearSectionPlane(): void {
+    if (this.viewport) {
+      this.viewport.renderer.setSectionPlane(null);
+    }
   }
 
   // ── Groups ────────────────────────────────────────────────────

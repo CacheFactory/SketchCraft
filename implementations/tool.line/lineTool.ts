@@ -240,16 +240,18 @@ export class LineTool extends BaseTool {
 
   /**
    * Apply axis lock: constrain the point to move only along the locked axis
-   * from the last placed point.
+   * from the last placed point. Respects custom axes orientation.
    */
   private applyAxisLock(point: Vec3): Vec3 {
     if (!this.axisLock || this.points.length === 0) return point;
     const last = this.points[this.points.length - 1];
-    switch (this.axisLock) {
-      case 'x': return { x: point.x, y: last.y, z: last.z };
-      case 'y': return { x: last.x, y: point.y, z: last.z };
-      case 'z': return { x: last.x, y: last.y, z: point.z };
-    }
+    const { customAxes } = require('../tool.axes/CustomAxes');
+    const axisDir: Vec3 = customAxes.getAxisDirection(this.axisLock);
+
+    // Project the offset onto the locked axis direction
+    const offset = vec3.sub(point, last);
+    const projLen = vec3.dot(offset, axisDir);
+    return vec3.add(last, vec3.mul(axisDir, projLen));
   }
 
   /**

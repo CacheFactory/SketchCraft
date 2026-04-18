@@ -115,8 +115,12 @@ export class GeometryEngine implements IGeometryEngine {
     // Collect intersection points along the segment p1→p2
     const intersections: Array<{ t: number; vertexId: string }> = [];
 
-    // For each face, check each boundary edge for intersection
-    for (const [, face] of this.mesh.faces) {
+    // Snapshot face IDs to avoid mutation during iteration
+    const faceIds = [...this.mesh.faces.keys()];
+
+    for (const faceId of faceIds) {
+      const face = this.mesh.faces.get(faceId);
+      if (!face) continue;
       const verts = face.vertexIds;
       for (let i = 0; i < verts.length; i++) {
         const nextI = (i + 1) % verts.length;
@@ -191,19 +195,30 @@ export class GeometryEngine implements IGeometryEngine {
     // Build the chain of vertices: v1 → int1 → int2 → ... → v2
     const chain = [v1Id, ...intersections.map(i => i.vertexId), v2Id];
 
-    // Create edges along the chain and run auto-face for each
+    // Create edges along the chain
     const createdEdges: IEdge[] = [];
     for (let i = 0; i < chain.length - 1; i++) {
       if (chain[i] === chain[i + 1]) continue;
       try {
-        const edge = this.createEdgeWithAutoFace(chain[i], chain[i + 1]);
+        const edge = this.createEdge(chain[i], chain[i + 1]);
         createdEdges.push(edge);
       } catch {
-        // Edge may already exist
         const existing = this.mesh.findEdgeBetween(chain[i], chain[i + 1]);
         if (existing) createdEdges.push(existing);
       }
     }
+
+    // Use splitFaceWithPath to handle vertices that lie on face boundary edges.
+    // This splits those boundary edges, inserts the vertices into face boundaries,
+    // and splits any bisected faces. This is the proven approach used by arc tools.
+    this.splitFaceWithPath(chain);
+
+    // Also run auto-face detection for each segment to find closed loops
+    for (let i = 0; i < chain.length - 1; i++) {
+      if (chain[i] === chain[i + 1]) continue;
+      this.autoCreateFaces(chain[i], chain[i + 1]);
+    }
+    console.log('[createEdgeWithIntersection] after autoCreateFaces, faces:', this.mesh.faces.size);
 
     return createdEdges;
   }
