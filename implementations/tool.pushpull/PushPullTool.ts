@@ -175,6 +175,25 @@ export class PushPullTool extends BaseTool {
     this.setVCBValue('');
   }
 
+  /**
+   * Check if a face is part of a 3D solid — i.e., has adjacent faces
+   * with different normals (side walls). If so, push/pull just moves
+   * the face vertices. Otherwise it's a standalone 2D face and we extrude.
+   */
+  private hasSideWalls(faceId: string, normal: Vec3): boolean {
+    const faceEdges = this.document.geometry.getFaceEdges(faceId);
+    for (const edge of faceEdges) {
+      const adjacentFaces = this.document.geometry.getEdgeFaces(edge.id);
+      for (const adj of adjacentFaces) {
+        if (adj.id === faceId) continue;
+        // Check if adjacent face has a different normal (not coplanar)
+        const dot = Math.abs(vec3.dot(adj.normal, normal));
+        if (dot < 0.9) return true; // Non-coplanar neighbor = side wall
+      }
+    }
+    return false;
+  }
+
   private commitExtrusion(): void {
     if (!this.selectedFaceId || !this.faceNormal || Math.abs(this.currentDistance) < 1e-10) {
       this.abortTransaction();
@@ -193,45 +212,43 @@ export class PushPullTool extends BaseTool {
 
     const offset = vec3.mul(this.faceNormal, this.currentDistance);
 
-    // 1. Create new vertices at the extruded position (the "top" of the box)
-    const newVertexIds: string[] = [];
-    for (const v of faceVertices) {
-      const newPos = vec3.add(v.position, offset);
-      const newVertex = this.document.geometry.createVertex(newPos);
-      newVertexIds.push(newVertex.id);
-    }
-
-    // 2. Create side faces connecting original face edges to new vertices
-    const n = faceVertices.length;
-    for (let i = 0; i < n; i++) {
-      const next = (i + 1) % n;
-      const bottomA = faceVertices[i].id;
-      const bottomB = faceVertices[next].id;
-      const topA = newVertexIds[i];
-      const topB = newVertexIds[next];
-
-      // Create the 4 edges of this side quad
-      this.document.geometry.createEdge(bottomA, topA);
-      this.document.geometry.createEdge(topA, topB);
-      // bottomA->bottomB edge already exists (part of original face)
-      // Only create bottomB->topB if it's the last side (otherwise next iteration creates it)
-      if (i === n - 1) {
-        this.document.geometry.createEdge(bottomB, topB);
+    if (this.hasSideWalls(this.selectedFaceId, this.faceNormal)) {
+      // 3D mode: just move existing vertices, side walls stretch automatically
+      for (const v of faceVertices) {
+        v.position = vec3.add(v.position, offset);
+      }
+    } else {
+      // 2D mode: extrude — create side walls and top cap
+      const newVertexIds: string[] = [];
+      for (const v of faceVertices) {
+        const newPos = vec3.add(v.position, offset);
+        const newVertex = this.document.geometry.createVertex(newPos);
+        newVertexIds.push(newVertex.id);
       }
 
-      // Create side quad face
-      // Winding: bottom-left, bottom-right, top-right, top-left
-      this.document.geometry.createFace([bottomA, bottomB, topB, topA]);
+      const n = faceVertices.length;
+      for (let i = 0; i < n; i++) {
+        const next = (i + 1) % n;
+        const bottomA = faceVertices[i].id;
+        const bottomB = faceVertices[next].id;
+        const topA = newVertexIds[i];
+        const topB = newVertexIds[next];
+
+        this.document.geometry.createEdge(bottomA, topA);
+        this.document.geometry.createEdge(topA, topB);
+        if (i === n - 1) {
+          this.document.geometry.createEdge(bottomB, topB);
+        }
+
+        this.document.geometry.createFace([bottomA, bottomB, topB, topA]);
+      }
+
+      this.document.geometry.createFace(newVertexIds);
     }
-
-    // 3. Create top cap face (the extruded copy of the original face)
-    this.document.geometry.createFace(newVertexIds);
-
-    // 4. The original bottom face remains (it's the bottom of the box)
 
     this.commitTransaction();
     this.document.selection.clear();
     this.reset();
-    this.setStatus('Extrusion complete! Click another face or press P again.');
+    this.setStatus('Push/Pull complete! Click another face.');
   }
 }
