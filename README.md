@@ -21,9 +21,11 @@ Signed and notarized macOS builds:
 - **Drawing tools** — Line, Rectangle, Circle, Arc, Polygon with live previews
 - **Modify tools** — Move, Rotate, Scale, Offset, Eraser with real-time feedback
 - **Axis locking** — arrow keys lock line drawing to X/Y/Z axis for precision
-- **Snap system** — automatic vertex/midpoint snapping with visual indicators
+- **Snap system** — automatic vertex/midpoint/on-edge snapping with visual indicators
 - **Auto-face creation** — closed edge loops automatically become faces
-- **Face splitting** — draw a line or arc across a face to split it (handles edge midpoints)
+- **Face splitting** — draw a line across a face to split it, including lines starting/ending on edges
+- **Custom axes** — click a face to reorient drawing axes; all tools respect the custom orientation
+- **AI chat** — natural language modeling assistant with 30+ tools for geometry, materials, and queries
 - **Selection** — click, shift-click, or drag-box to select faces and edges
 - **Undo/Redo** — full snapshot-based undo history
 - **Components** — group geometry into protected reusable components
@@ -71,6 +73,7 @@ npx playwright test
 | `Z` | Zoom | | | |
 | `T` | Tape Measure | | | |
 | `D` | Dimension | | | |
+| `Shift+A` | Axes | | | |
 
 ## Architecture
 
@@ -257,7 +260,10 @@ Snapshot-based using `geometry.serialize()/deserialize()`. `newDocument()` calls
 `splitFaceWithPath()` handles arc endpoints ON face edges (not just corners) via proximity detection and vertex insertion. Both resulting faces include arc vertices on their shared boundary (no chord edge).
 
 ### Axis Locking (Line Tool)
-Arrow keys lock to axis: Up=Y (vertical), Right=X, Left=Z. Uses ray-to-line projection for accurate 3D positioning from any camera angle. Lock resets after placing each point.
+Arrow keys lock to axis: Up=Y (vertical), Right=X, Left=Z. Uses ray-to-line projection for accurate 3D positioning from any camera angle. Lock resets after placing each point. All axis locking respects custom axes set via the Axes tool.
+
+### On-Edge Snapping
+Drawing tools snap to nearby edges (not just vertices/midpoints). Uses ray-segment closest point computation. Red snap marker distinguishes on-edge snaps from green endpoint snaps. When a vertex is placed on an edge, the edge is automatically split.
 
 ## Contributing
 
@@ -267,12 +273,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines, including how to
 
 Look for nodes with `impl.status: placeholder` or `impl.status: stub` in `archigraph.yaml`:
 
-- **Boolean operations** — union/subtract/intersect solids (needs Manifold WASM)
-- **Follow Me tool** — sweep profile along path
-- **Dimension/Text tools** — annotation rendering
-- **Section planes** — clipping plane visualization
 - **Push/Pull live preview** — show 3D extrusion during drag
-- **Material system** — color picker, texture loading
 - **Performance** — spatial indexing for snap detection, frustum culling
 - **File formats** — improve OBJ, add glTF/STL export
 
