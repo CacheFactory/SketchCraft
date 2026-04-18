@@ -17,7 +17,7 @@ Signed and notarized macOS builds:
 
 ## Features
 
-- **Push/Pull modeling** — draw a 2D face, extrude it into a 3D solid
+- **Push/Pull modeling** — extrude 2D faces into 3D solids, or move 3D faces to resize
 - **Drawing tools** — Line, Rectangle, Circle, Arc, Polygon with live previews
 - **Modify tools** — Move, Rotate, Scale, Offset, Eraser with real-time feedback
 - **Axis locking** — arrow keys lock line drawing to X/Y/Z axis for precision
