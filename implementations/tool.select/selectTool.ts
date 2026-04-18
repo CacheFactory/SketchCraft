@@ -80,10 +80,16 @@ export class SelectTool extends BaseTool {
       }
     }
 
-    // Check if clicking a dimension text — start dimension drag
+    // Dimension click: select it (drag starts on mouse move if threshold exceeded)
     if (event.hitEntityId && dimensionStore.isDimensionEntity(event.hitEntityId)) {
       this.draggingDimId = event.hitEntityId;
-      this.setStatus('Drag to reposition dimension text.');
+      if (event.shiftKey) {
+        this.document.selection.toggle(event.hitEntityId);
+      } else {
+        this.document.selection.clear();
+        this.document.selection.add(event.hitEntityId);
+      }
+      this.setStatus('Selected dimension. Press Delete to remove, or drag to reposition.');
       return;
     }
 
@@ -261,6 +267,20 @@ export class SelectTool extends BaseTool {
       if (ids.length > 0) {
         this.beginTransaction('Delete');
         for (const id of ids) {
+          // Delete dimensions (visual overlays)
+          if (dimensionStore.isDimensionEntity(id)) {
+            const dim = dimensionStore.remove(id);
+            if (dim) {
+              for (const lineId of dim.guideLineIds) {
+                this.viewport.renderer.removeGuideLine(lineId);
+              }
+              if (dim.sprite.parent) dim.sprite.parent.remove(dim.sprite);
+              (dim.sprite.material as any).map?.dispose();
+              dim.sprite.material.dispose();
+            }
+            continue;
+          }
+          // Delete geometry entities
           this.document.geometry.deleteFace(id);
           this.document.geometry.deleteEdge(id);
         }
@@ -285,6 +305,7 @@ export class SelectTool extends BaseTool {
   }
 
   private getEntityTypeLabel(entityId: string): string {
+    if (dimensionStore.isDimensionEntity(entityId)) return 'dimension';
     if (this.document.geometry.getFace(entityId)) return 'face';
     if (this.document.geometry.getEdge(entityId)) return 'edge';
     const entity = this.document.scene.getEntity(entityId);
