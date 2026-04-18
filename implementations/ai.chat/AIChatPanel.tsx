@@ -117,7 +117,7 @@ export function AIChatPanel() {
         const toolResults: Array<{ type: string; tool_use_id: string; content: string }> = [];
 
         for (const tu of toolUseBlocks) {
-          const result = executeTool(modelAPI, tu.name!, tu.input!);
+          const result = await executeTool(modelAPI, tu.name!, tu.input!);
           toolCalls.push({ name: tu.name!, input: tu.input!, result });
           toolResults.push({
             type: 'tool_result',

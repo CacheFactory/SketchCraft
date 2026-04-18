@@ -128,9 +128,9 @@ export interface IModelAPI {
   sweep(profileFaceId: string, pathEdgeIds: string[], alignToPath?: boolean): ShapeResult;
 
   // Boolean CSG
-  booleanUnion(regionAIds: string[], regionBIds: string[]): ShapeResult;
-  booleanSubtract(regionAIds: string[], regionBIds: string[]): ShapeResult;
-  booleanIntersect(regionAIds: string[], regionBIds: string[]): ShapeResult;
+  booleanUnion(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult>;
+  booleanSubtract(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult>;
+  booleanIntersect(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult>;
 
   // Queries
   getEdgeInfo(edgeId: string): EdgeInfo | null;
@@ -1318,40 +1318,59 @@ export class ModelAPI implements IModelAPI {
     return { faceIds, edgeIds, vertexIds };
   }
 
-  booleanUnion(regionAIds: string[], regionBIds: string[]): ShapeResult {
-    return this.transact('Boolean Union', () => {
+  // @archigraph calls|api.model|native.manifold|runtime
+  async booleanUnion(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult> {
+    this.hist.beginTransaction('Boolean Union');
+    try {
       const op = new BooleanUnion();
-      const result = op.execute(this.geo, {
+      const result = await op.execute(this.geo, {
         regionA: this.buildRegion(regionAIds),
         regionB: this.buildRegion(regionBIds),
       });
       if (!result.success) throw new Error(result.error || 'Boolean union failed');
+      this.hist.commitTransaction();
+      this.syncScene();
       return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
-    });
+    } catch (e) {
+      this.hist.abortTransaction();
+      throw e;
+    }
   }
 
-  booleanSubtract(regionAIds: string[], regionBIds: string[]): ShapeResult {
-    return this.transact('Boolean Subtract', () => {
+  async booleanSubtract(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult> {
+    this.hist.beginTransaction('Boolean Subtract');
+    try {
       const op = new BooleanSubtract();
-      const result = op.execute(this.geo, {
+      const result = await op.execute(this.geo, {
         regionA: this.buildRegion(regionAIds),
         regionB: this.buildRegion(regionBIds),
       });
       if (!result.success) throw new Error(result.error || 'Boolean subtract failed');
+      this.hist.commitTransaction();
+      this.syncScene();
       return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
-    });
+    } catch (e) {
+      this.hist.abortTransaction();
+      throw e;
+    }
   }
 
-  booleanIntersect(regionAIds: string[], regionBIds: string[]): ShapeResult {
-    return this.transact('Boolean Intersect', () => {
+  async booleanIntersect(regionAIds: string[], regionBIds: string[]): Promise<ShapeResult> {
+    this.hist.beginTransaction('Boolean Intersect');
+    try {
       const op = new BooleanIntersect();
-      const result = op.execute(this.geo, {
+      const result = await op.execute(this.geo, {
         regionA: this.buildRegion(regionAIds),
         regionB: this.buildRegion(regionBIds),
       });
       if (!result.success) throw new Error(result.error || 'Boolean intersect failed');
+      this.hist.commitTransaction();
+      this.syncScene();
       return { faceIds: result.newFaceIds, edgeIds: result.newEdgeIds, vertexIds: result.newVertexIds };
-    });
+    } catch (e) {
+      this.hist.abortTransaction();
+      throw e;
+    }
   }
 
   // ── Advanced Queries ───────────────────────────────────────

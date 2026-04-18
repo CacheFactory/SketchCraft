@@ -788,7 +788,7 @@ export function contextToMessage(ctx: SelectionContext): string {
 
 // ─── Tool Executor ───────────────────────────────────────────────
 
-export function executeTool(api: IModelAPI, name: string, input: Record<string, unknown>): string {
+export async function executeTool(api: IModelAPI, name: string, input: Record<string, unknown>): Promise<string> {
   try {
     switch (name) {
       case 'createBox': {
@@ -943,15 +943,15 @@ export function executeTool(api: IModelAPI, name: string, input: Record<string, 
       }
       // ── Boolean CSG ──
       case 'booleanUnion': {
-        const r = api.booleanUnion(input.regionAIds as string[], input.regionBIds as string[]);
+        const r = await api.booleanUnion(input.regionAIds as string[], input.regionBIds as string[]);
         return JSON.stringify({ ok: true, faceIds: r.faceIds });
       }
       case 'booleanSubtract': {
-        const r = api.booleanSubtract(input.regionAIds as string[], input.regionBIds as string[]);
+        const r = await api.booleanSubtract(input.regionAIds as string[], input.regionBIds as string[]);
         return JSON.stringify({ ok: true, faceIds: r.faceIds });
       }
       case 'booleanIntersect': {
-        const r = api.booleanIntersect(input.regionAIds as string[], input.regionBIds as string[]);
+        const r = await api.booleanIntersect(input.regionAIds as string[], input.regionBIds as string[]);
         return JSON.stringify({ ok: true, faceIds: r.faceIds });
       }
       // ── Advanced Queries ──
@@ -1013,7 +1013,10 @@ export function executeTool(api: IModelAPI, name: string, input: Record<string, 
         const ops = input.operations as Array<{ tool: string; input: Record<string, unknown> }>;
         api.batch(input.name as string, (batchApi) => {
           for (const op of ops) {
-            executeTool(batchApi, op.tool, op.input);
+            // Batch operations are sync-only; boolean CSG ops should not be
+            // used inside batch (they are async). Non-async tools resolve
+            // immediately so the returned promise is already fulfilled.
+            void executeTool(batchApi, op.tool, op.input);
           }
         });
         return JSON.stringify({ ok: true, operationCount: ops.length });

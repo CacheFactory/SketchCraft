@@ -1,8 +1,10 @@
 // @archigraph worker.mesh
 // Web Worker for heavy mesh operations (triangulation, subdivision, booleans)
 // Runs in a separate thread to keep the UI responsive.
+// @archigraph calls|worker.mesh|native.manifold|runtime
 
 import { Vec3 } from '../../src/core/types';
+import { ManifoldBridge } from '../native.manifold/ManifoldBridge';
 
 // ─── Message Types ──────────────────────────────────────────────
 
@@ -43,6 +45,20 @@ export interface MeshWorkerResponse {
     faces: number[][];
   };
   error?: string;
+}
+
+// ─── Manifold Bridge (lazy-initialized per worker) ──────────────
+
+let workerBridge: ManifoldBridge | null = null;
+
+async function getWorkerBridge(): Promise<ManifoldBridge> {
+  if (!workerBridge) {
+    workerBridge = new ManifoldBridge();
+  }
+  if (!workerBridge.isReady()) {
+    await workerBridge.initialize();
+  }
+  return workerBridge;
 }
 
 // ─── Triangulation ──────────────────────────────────────────────
@@ -329,39 +345,39 @@ function subdivideLoop(
   return result;
 }
 
-// ─── Boolean Operations (Stub) ──────────────────────────────────
+// ─── Boolean Operations (Manifold WASM) ─────────────────────────
 
-function booleanOp(
+async function booleanOp(
   operation: 'union' | 'subtract' | 'intersect',
   meshA: { vertices: Vec3[]; faces: number[][] },
   meshB: { vertices: Vec3[]; faces: number[][] },
-): { vertices: Vec3[]; faces: number[][] } {
-  // Boolean operations on meshes require a CSG library (e.g., Manifold).
-  // This stub merges meshes naively for 'union' and throws for others.
+): Promise<{ vertices: Vec3[]; faces: number[][] }> {
+  const bridge = await getWorkerBridge();
 
-  if (operation === 'union') {
-    const offset = meshA.vertices.length;
-    const combinedVerts = [...meshA.vertices, ...meshB.vertices];
-    const combinedFaces = [
-      ...meshA.faces,
-      ...meshB.faces.map(f => f.map(i => i + offset)),
-    ];
-    return { vertices: combinedVerts, faces: combinedFaces };
+  const manifoldMeshA = { vertices: meshA.vertices, faces: meshA.faces };
+  const manifoldMeshB = { vertices: meshB.vertices, faces: meshB.faces };
+
+  let resultMesh;
+  switch (operation) {
+    case 'union':
+      resultMesh = await bridge.union(manifoldMeshA, manifoldMeshB);
+      break;
+    case 'subtract':
+      resultMesh = await bridge.subtract(manifoldMeshA, manifoldMeshB);
+      break;
+    case 'intersect':
+      resultMesh = await bridge.intersect(manifoldMeshA, manifoldMeshB);
+      break;
   }
 
-  // For subtract and intersect, we need a proper CSG implementation.
-  // Delegate to ManifoldBridge if available, otherwise throw.
-  throw new Error(
-    `Boolean '${operation}' requires the Manifold WASM module. ` +
-    'Install @sketchcraft/manifold-wasm for CSG boolean operations.',
-  );
+  return { vertices: resultMesh.vertices, faces: resultMesh.faces };
 }
 
 // ─── Worker Message Handler ─────────────────────────────────────
 
 const ctx = self as unknown as Worker;
 
-ctx.onmessage = (event: MessageEvent<MeshWorkerRequest>) => {
+ctx.onmessage = async (event: MessageEvent<MeshWorkerRequest>) => {
   const request = event.data;
 
   try {
@@ -389,7 +405,7 @@ ctx.onmessage = (event: MessageEvent<MeshWorkerRequest>) => {
         break;
 
       case 'boolean':
-        result = booleanOp(
+        result = await booleanOp(
           request.data.operation,
           request.data.meshA,
           request.data.meshB,

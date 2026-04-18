@@ -8,8 +8,10 @@ import { vec3, EPSILON } from '../../src/core/math';
 export interface MirrorParams {
   faceIds: string[];      // faces to mirror
   plane: Plane;           // mirror plane (normal + distance)
-  mergeThreshold?: number; // distance within which mirrored vertices merge with originals (default: EPSILON)
+  mergeThreshold?: number; // distance within which mirrored vertices merge with originals (default: EPSILON * 100)
   deleteOriginal?: boolean; // if true, remove original geometry (default: false)
+  /** If true, preserve material indices from source faces. Default: true */
+  preserveMaterials?: boolean;
 }
 
 export interface MirrorResult {
@@ -25,10 +27,12 @@ export interface MirrorResult {
  * Mirror Modifier: mirrors geometry across a plane.
  *
  * Algorithm:
- * 1. For each vertex, compute its reflection across the mirror plane.
- * 2. If a reflected vertex is within mergeThreshold of an existing vertex, merge them.
- * 3. Create mirrored faces with reversed winding (to maintain outward normals).
- * 4. Create edges for the mirrored faces.
+ * 1. Validate mirror plane orientation (normal must be non-zero).
+ * 2. For each vertex, compute its reflection across the mirror plane.
+ * 3. If a reflected vertex is within mergeThreshold of an existing vertex, merge them.
+ * 4. Create mirrored faces with reversed winding (to maintain outward normals).
+ * 5. Preserve material indices from source faces.
+ * 6. Create edges for the mirrored faces.
  */
 export class MirrorModifier {
   execute(engine: IGeometryEngine, params: MirrorParams): MirrorResult {
@@ -37,10 +41,33 @@ export class MirrorModifier {
       plane,
       mergeThreshold = EPSILON * 100,
       deleteOriginal = false,
+      preserveMaterials = true,
     } = params;
 
+    // --- Validation ---
     if (faceIds.length === 0) {
-      return { success: false, newFaceIds: [], newEdgeIds: [], newVertexIds: [], mergedVertexIds: [], error: 'No faces specified' };
+      return this.fail('No faces specified');
+    }
+
+    // Validate mirror plane normal
+    const normalLen = vec3.length(plane.normal);
+    if (normalLen < EPSILON) {
+      return this.fail('Mirror plane normal must be non-zero');
+    }
+
+    // Normalize the plane normal for consistent distance calculations
+    const normalizedPlane: Plane = {
+      normal: vec3.div(plane.normal, normalLen),
+      distance: plane.distance / normalLen,
+    };
+
+    // Validate that the normal is a valid direction (not NaN/Infinity)
+    if (
+      !isFinite(normalizedPlane.normal.x) ||
+      !isFinite(normalizedPlane.normal.y) ||
+      !isFinite(normalizedPlane.normal.z)
+    ) {
+      return this.fail('Mirror plane normal contains invalid values');
     }
 
     const newVertexIds: string[] = [];
@@ -58,17 +85,27 @@ export class MirrorModifier {
       }
     }
 
+    // Build a spatial index of all source vertices for efficient merge lookup
+    const sourceVertexPositions = new Map<string, Vec3>();
+    for (const vid of sourceVertexIdSet) {
+      const v = engine.getVertex(vid);
+      if (v) {
+        sourceVertexPositions.set(vid, v.position);
+      }
+    }
+
     // Map from original vertex ID to mirrored vertex ID
     const vertexMap = new Map<string, string>();
+    const mergeThresholdSq = mergeThreshold * mergeThreshold;
 
     for (const vid of sourceVertexIdSet) {
       const v = engine.getVertex(vid);
       if (!v) continue;
 
-      const reflected = this.reflectPoint(v.position, plane);
+      const reflected = this.reflectPoint(v.position, normalizedPlane);
 
       // Check if the reflected position is close to the original (vertex on mirror plane)
-      if (vec3.distance(reflected, v.position) < mergeThreshold) {
+      if (vec3.distanceSq(reflected, v.position) < mergeThresholdSq) {
         // Vertex is on the mirror plane; map to itself
         vertexMap.set(vid, vid);
         mergedVertexIds.push(vid);
@@ -77,14 +114,26 @@ export class MirrorModifier {
 
       // Check if the reflected position is close to any existing source vertex
       let merged = false;
-      for (const existingVid of sourceVertexIdSet) {
+      for (const [existingVid, existingPos] of sourceVertexPositions) {
         if (existingVid === vid) continue;
-        const ev = engine.getVertex(existingVid);
-        if (ev && vec3.distance(reflected, ev.position) < mergeThreshold) {
+        if (vec3.distanceSq(reflected, existingPos) < mergeThresholdSq) {
           vertexMap.set(vid, existingVid);
           mergedVertexIds.push(existingVid);
           merged = true;
           break;
+        }
+      }
+
+      // Also check against already-created mirrored vertices
+      if (!merged) {
+        for (const newVid of newVertexIds) {
+          const nv = engine.getVertex(newVid);
+          if (nv && vec3.distanceSq(reflected, nv.position) < mergeThresholdSq) {
+            vertexMap.set(vid, newVid);
+            mergedVertexIds.push(newVid);
+            merged = true;
+            break;
+          }
         }
       }
 
@@ -109,13 +158,23 @@ export class MirrorModifier {
         .reverse();
 
       // Skip if mirrored face is identical to original (all vertices mapped to themselves)
-      const isIdentical = face.vertexIds.every((vid, i) =>
+      const isIdentical = face.vertexIds.every((vid) =>
         vertexMap.get(vid) === vid,
       );
       if (isIdentical) continue;
 
+      // Check for degenerate mirrored face (fewer than 3 unique vertices)
+      const uniqueVerts = new Set(mirroredVerts);
+      if (uniqueVerts.size < 3) continue;
+
       const newFace = engine.createFace(mirroredVerts);
       newFaceIds.push(newFace.id);
+
+      // Preserve material assignments
+      if (preserveMaterials) {
+        newFace.materialIndex = face.materialIndex;
+        newFace.backMaterialIndex = face.backMaterialIndex;
+      }
 
       // Create edges
       for (let i = 0; i < mirroredVerts.length; i++) {
@@ -155,5 +214,16 @@ export class MirrorModifier {
   private reflectPoint(point: Vec3, plane: Plane): Vec3 {
     const dist = vec3.dot(point, plane.normal) - plane.distance;
     return vec3.sub(point, vec3.mul(plane.normal, 2 * dist));
+  }
+
+  private fail(error: string): MirrorResult {
+    return {
+      success: false,
+      newFaceIds: [],
+      newEdgeIds: [],
+      newVertexIds: [],
+      mergedVertexIds: [],
+      error,
+    };
   }
 }

@@ -11,6 +11,7 @@
     "build": "npm run build:main && npm run build:renderer",
     "start": "electron dist/main/main.js",
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "dist:win": "npm run build && electron-builder --win --x64",
     "test": "jest",
     "test:e2e": "jest --config jest.e2e.config.js"
   },
@@ -28,7 +29,13 @@
     "mac": {
       "category": "public.app-category.graphics-design",
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -43,11 +50,14 @@
   "dependencies": {
     "assimpjs": "^0.0.10",
     "electron-store": "^8.1.0",
+    "manifold-3d": "^3.4.1",
+    "opencascade.js": "^1.1.1",
     "three": "^0.162.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@types/jest": "^30.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/three": "^0.162.0",

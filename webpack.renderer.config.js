@@ -21,9 +21,14 @@ module.exports = {
   },
   resolve: {
     extensions: ['.tsx', '.ts', '.js'],
+    conditionNames: ['import', 'module', 'browser', 'default'],
     alias: {
       '@core': path.resolve(__dirname, 'src/core'),
     },
+  },
+  externals: {
+    'manifold-3d': 'commonjs manifold-3d',
+    'opencascade.js': 'commonjs opencascade.js',
   },
   output: {
     path: path.resolve(__dirname, 'dist/renderer'),

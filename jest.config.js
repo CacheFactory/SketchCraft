@@ -11,4 +11,21 @@ module.exports = {
     '^@operations/(.*)$': '<rootDir>/src/operations/$1',
     '^@file/(.*)$': '<rootDir>/src/file/$1',
   },
+  transform: {
+    '^.+\\.ts$': ['ts-jest', {
+      tsconfig: {
+        target: 'ES2022',
+        module: 'commonjs',
+        lib: ['ES2022'],
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        forceConsistentCasingInFileNames: true,
+        resolveJsonModule: true,
+        sourceMap: true,
+        baseUrl: '.',
+        types: ['jest'],
+      },
+    }],
+  },
 };

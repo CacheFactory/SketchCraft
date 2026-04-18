@@ -41,9 +41,9 @@ export class ManifoldBridge {
 
     try {
       // Dynamic import of the manifold-wasm package
-      // This will be resolved at runtime if the package is installed.
+      // Use webpack magic comment to prevent bundling — loaded at runtime only
       // @ts-ignore - Optional dependency, loaded at runtime if available
-      const manifoldModule = await import('manifold-3d');
+      const manifoldModule = await import(/* webpackIgnore: true */ 'manifold-3d');
       this.module = manifoldModule as unknown as ManifoldModule;
       await this.module.setup();
       this.initialized = true;
