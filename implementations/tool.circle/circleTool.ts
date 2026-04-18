@@ -168,6 +168,15 @@ export class CircleTool extends BaseTool {
       for (const edge of edges) edge.curveId = curveId;
     }
 
+    // Explicitly create the face — autoCreateFaces BFS can't find loops
+    // longer than its maxDepth, so we create it directly since we know
+    // these vertices form a closed coplanar polygon.
+    try {
+      this.document.geometry.createFace(vertexIds);
+    } catch {
+      // Face creation may fail if edges were split by intersections
+    }
+
     this.commitTransaction();
     this.reset();
     this.setStatus(`Circle created. Click to place center. Segments: ${this.segments}`);
