@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The Electron main process is the Node.js backend of SketchCraft. It serves as the trusted compute and file system boundary for the application. All privileged operations — file I/O, native module invocation, OS integration, and preference persistence — must go through this process. The renderer process (`process.renderer`) communicates with it exclusively via IPC channels exposed through a preload script.
+The Electron main process is the Node.js backend of DraftDown. It serves as the trusted compute and file system boundary for the application. All privileged operations — file I/O, native module invocation, OS integration, and preference persistence — must go through this process. The renderer process (`process.renderer`) communicates with it exclusively via IPC channels exposed through a preload script.
 
 This component is responsible for:
 - Application lifecycle (startup, window management, shutdown)
@@ -117,7 +117,7 @@ interface UserPreferences {
 
 - **`app:get-user-data-path`**
   - Returns OS-specific user data directory path
-  - Platform-specific: `~/Library/Application Support/SketchCraft` (macOS), `%APPDATA%/SketchCraft` (Windows), `~/.config/SketchCraft` (Linux)
+  - Platform-specific: `~/Library/Application Support/DraftDown` (macOS), `%APPDATA%/DraftDown` (Windows), `~/.config/DraftDown` (Linux)
 
 - **`app:quit`**
   - Gracefully shuts down application

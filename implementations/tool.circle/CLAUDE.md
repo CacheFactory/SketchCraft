@@ -149,7 +149,7 @@ The circle must be drawn on a plane determined by:
 - Implementation language: TypeScript
 - Complexity level: Moderate
 - Must integrate with existing tool activation/deactivation framework
-- Must follow SketchCraft's tool interface contract (assumed to exist for tools in this layer)
+- Must follow DraftDown's tool interface contract (assumed to exist for tools in this layer)
 - Coordinate system: right-handed 3D (consistent with Three.js)
 - Units: Must respect current document unit system (e.g., inches, meters, millimeters)
 

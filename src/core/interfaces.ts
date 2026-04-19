@@ -1,5 +1,5 @@
 // @archigraph core-interfaces
-// Core interfaces for SketchCraft subsystems
+// Core interfaces for DraftDown subsystems
 
 import {
   Vec3, Vec2, Ray, BoundingBox, Transform, Color,

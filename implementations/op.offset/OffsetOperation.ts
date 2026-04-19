@@ -1,5 +1,5 @@
 // @archigraph op.offset
-// Face offset (inset/outset) operation for SketchCraft
+// Face offset (inset/outset) operation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex, IEdge } from '../../src/core/interfaces';

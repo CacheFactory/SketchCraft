@@ -1,5 +1,5 @@
 // @archigraph ai.chat
-// AI Chat sub-window panel for SketchCraft
+// AI Chat sub-window panel for DraftDown
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../window.main/AppContext';

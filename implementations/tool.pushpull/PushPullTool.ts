@@ -142,6 +142,20 @@ export class PushPullTool extends BaseTool {
 
   // ── Private ────────────────────────────────────────────
 
+  /** Newell's method — compute normal from current vertex positions */
+  private computeNormalFromPositions(positions: Vec3[]): Vec3 {
+    const n: Vec3 = { x: 0, y: 0, z: 0 };
+    const len = positions.length;
+    for (let i = 0; i < len; i++) {
+      const curr = positions[i];
+      const next = positions[(i + 1) % len];
+      n.x += (curr.y - next.y) * (curr.z + next.z);
+      n.y += (curr.z - next.z) * (curr.x + next.x);
+      n.z += (curr.x - next.x) * (curr.y + next.y);
+    }
+    return vec3.normalize(n);
+  }
+
   private setViewportCursor(isPointer: boolean): void {
     const container = document.querySelector('.viewport-container') as HTMLElement;
     if (container) {
@@ -152,10 +166,16 @@ export class PushPullTool extends BaseTool {
   private startOnFace(face: IFace, screenY: number): void {
     this.selectedFaceId = face.id;
 
-    // Ensure normal points "outward" — for a ground plane face (Y normal),
-    // we want push to go up (positive Y)
-    let normal = vec3.clone(face.normal);
-    // Normalize just in case
+    // Recompute normal from current vertex positions — the stored face.normal
+    // may be stale if vertices were moved by rotate/move/scale tools.
+    const verts = this.document.geometry.getFaceVertices(face.id);
+    let normal: Vec3;
+    if (verts.length >= 3) {
+      const positions = verts.map(v => v.position);
+      normal = this.computeNormalFromPositions(positions);
+    } else {
+      normal = vec3.clone(face.normal);
+    }
     const len = vec3.length(normal);
     if (len > 0) normal = vec3.div(normal, len);
     this.faceNormal = normal;
@@ -186,8 +206,14 @@ export class PushPullTool extends BaseTool {
       const adjacentFaces = this.document.geometry.getEdgeFaces(edge.id);
       for (const adj of adjacentFaces) {
         if (adj.id === faceId) continue;
+        // Recompute adjacent face normal from current vertex positions
+        const adjVerts = this.document.geometry.getFaceVertices(adj.id);
+        let adjNormal = adj.normal;
+        if (adjVerts.length >= 3) {
+          adjNormal = this.computeNormalFromPositions(adjVerts.map(v => v.position));
+        }
         // Check if adjacent face has a different normal (not coplanar)
-        const dot = Math.abs(vec3.dot(adj.normal, normal));
+        const dot = Math.abs(vec3.dot(adjNormal, normal));
         if (dot < 0.9) return true; // Non-coplanar neighbor = side wall
       }
     }

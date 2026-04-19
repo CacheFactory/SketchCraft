@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Tool E2E Tests component is a comprehensive Playwright-based test suite that validates all interactive tools in the SketchCraft 3D CAD application through end-to-end user workflows. This suite launches the full Electron application and exercises complete tool interactions from activation through geometry creation to undo/redo operations.
+The Tool E2E Tests component is a comprehensive Playwright-based test suite that validates all interactive tools in the DraftDown 3D CAD application through end-to-end user workflows. This suite launches the full Electron application and exercises complete tool interactions from activation through geometry creation to undo/redo operations.
 
 ## Responsibilities
 

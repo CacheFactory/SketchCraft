@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Dimension Tool enables users to add measurement annotations to 3D models in SketchCraft. It is an interactive tool in the Drawing Toolbar that allows users to click two points in the scene to create dimension annotations showing distances, angles, or radii. These annotations are associative — they automatically update when the underlying geometry changes.
+The Dimension Tool enables users to add measurement annotations to 3D models in DraftDown. It is an interactive tool in the Drawing Toolbar that allows users to click two points in the scene to create dimension annotations showing distances, angles, or radii. These annotations are associative — they automatically update when the underlying geometry changes.
 
 This component is responsible for:
 - Capturing user input to define dimension endpoints
@@ -25,7 +25,7 @@ This component is responsible for:
 ## APIs and Interfaces
 
 ### Tool Activation Interface
-Must implement standard SketchCraft tool lifecycle:
+Must implement standard DraftDown tool lifecycle:
 - Activate when selected from Drawing Toolbar or `D` key pressed
 - Set cursor to crosshair
 - Deactivate when another tool is selected
@@ -125,7 +125,7 @@ When geometry changes, the tool's dimension entities must:
 - Units must be consistent with scene/project settings
 
 ### Implementation Constraints
-- Must follow SketchCraft tool architecture and lifecycle patterns
+- Must follow DraftDown tool architecture and lifecycle patterns
 - Must use Scene Manager APIs for all data persistence
 - Must not directly manipulate Three.js scene graph — use Scene Manager abstraction
 - TypeScript implementation with moderate complexity expected

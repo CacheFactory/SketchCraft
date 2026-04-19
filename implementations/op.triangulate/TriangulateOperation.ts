@@ -1,5 +1,5 @@
 // @archigraph op.triangulate
-// Face triangulation using ear-clipping for SketchCraft
+// Face triangulation using ear-clipping for DraftDown
 
 import { Vec3, Vec2 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex } from '../../src/core/interfaces';

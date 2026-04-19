@@ -2,9 +2,9 @@
 
 ## Overview
 
-This component provides **AutoCAD DXF (Drawing Exchange Format) import and export** capabilities for SketchCraft. It enables interoperability with external CAD systems by reading and writing DXF files, a widely-adopted format for exchanging 2D and 3D geometric data.
+This component provides **AutoCAD DXF (Drawing Exchange Format) import and export** capabilities for DraftDown. It enables interoperability with external CAD systems by reading and writing DXF files, a widely-adopted format for exchanging 2D and 3D geometric data.
 
-**Responsibility**: Bidirectional translation between SketchCraft's internal geometry representation and the DXF file format, handling 2D/3D entities, unit conversion, and coordinate system transformations.
+**Responsibility**: Bidirectional translation between DraftDown's internal geometry representation and the DXF file format, handling 2D/3D entities, unit conversion, and coordinate system transformations.
 
 **Archigraph ID**: `file.dxf` (uuid: `J9iodp3B`)
 
@@ -12,7 +12,7 @@ This component provides **AutoCAD DXF (Drawing Exchange Format) import and expor
 
 ## Required Capabilities
 
-### Import (DXF → SketchCraft)
+### Import (DXF → DraftDown)
 
 Must read DXF files from the local file system and extract:
 
@@ -23,12 +23,12 @@ Must read DXF files from the local file system and extract:
 - **Units**: Drawing units metadata (inches, millimeters, etc.)
 
 Must convert:
-- DXF coordinate system to SketchCraft's coordinate system
-- DXF units to SketchCraft's internal units
-- DXF blocks to SketchCraft groups
+- DXF coordinate system to DraftDown's coordinate system
+- DXF units to DraftDown's internal units
+- DXF blocks to DraftDown groups
 - 2D entities (when Z=0) to appropriate 3D representations
 
-### Export (SketchCraft → DXF)
+### Export (DraftDown → DXF)
 
 Must write DXF files to the local file system containing:
 
@@ -38,8 +38,8 @@ Must write DXF files to the local file system containing:
 - **Layers**: Organized by geometry type or user-defined layers
 
 Must convert:
-- SketchCraft coordinates to DXF coordinate system
-- SketchCraft internal units to target DXF units
+- DraftDown coordinates to DXF coordinate system
+- DraftDown internal units to target DXF units
 - Curved edges to appropriate approximations (polylines or arc segments)
 
 Must generate valid DXF structure:
@@ -65,9 +65,9 @@ Must generate valid DXF structure:
 - Format: ASCII DXF (version R12 or R2013 for broad compatibility)
 - Expected location: User-selected save paths via file picker dialogs
 
-### SketchCraft Internal Geometry
+### DraftDown Internal Geometry
 
-Must consume/produce geometry data matching SketchCraft's internal representation:
+Must consume/produce geometry data matching DraftDown's internal representation:
 
 **Vertices**: 3D points (x, y, z coordinates)
 
@@ -96,12 +96,12 @@ Must consume/produce geometry data matching SketchCraft's internal representatio
 - +Z typically "up" in 3D views
 - +X right, +Y forward
 
-Must handle coordinate system mapping if SketchCraft uses different conventions.
+Must handle coordinate system mapping if DraftDown uses different conventions.
 
 ### Unit Conversion
 
 Must support conversion between:
-- SketchCraft's internal unit system (assumed to be consistent across application)
+- DraftDown's internal unit system (assumed to be consistent across application)
 - DXF drawing units: inches, feet, millimeters, centimeters, meters
 - DXF $INSUNITS header variable indicates drawing units
 - DXF $MEASUREMENT variable (0=Imperial, 1=Metric)
@@ -172,10 +172,10 @@ Must be covered by **File I/O E2E Tests** (`test.e2e.file_io`):
 **External Libraries** (Recommended for DXF parsing):
 - May use existing DXF parsing libraries (e.g., dxf-parser, node-dxf) for read operations
 - May use DXF generation libraries (e.g., dxf-writer, dxf) for write operations
-- Must ensure licenses are compatible with SketchCraft's distribution model
+- Must ensure licenses are compatible with DraftDown's distribution model
 
 **Internal Dependencies**:
-- SketchCraft geometry kernel (for internal representation of vertices, edges, faces, groups)
+- DraftDown geometry kernel (for internal representation of vertices, edges, faces, groups)
 - File system access APIs (Electron/Node.js fs module)
 - Unit conversion utilities (if centralized elsewhere in application)
 

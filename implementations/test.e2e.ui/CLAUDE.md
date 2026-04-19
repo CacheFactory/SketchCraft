@@ -9,7 +9,7 @@
 
 ## Purpose
 
-This test suite validates all UI elements and interactions in the SketchCraft Electron application through end-to-end testing. It must verify that windows, panels, toolbars, menus, dialogs, and all interactive UI components behave correctly in a real application environment.
+This test suite validates all UI elements and interactions in the DraftDown Electron application through end-to-end testing. It must verify that windows, panels, toolbars, menus, dialogs, and all interactive UI components behave correctly in a real application environment.
 
 ## Responsibilities
 

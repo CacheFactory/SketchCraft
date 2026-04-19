@@ -1,5 +1,5 @@
 // @archigraph op.smooth
-// Smooth/soften edges modifier with Catmull-Clark subdivision for SketchCraft
+// Smooth/soften edges modifier with Catmull-Clark subdivision for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IEdge, IFace, IVertex } from '../../src/core/interfaces';

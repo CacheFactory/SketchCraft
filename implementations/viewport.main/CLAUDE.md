@@ -7,7 +7,7 @@
 
 ## Purpose
 
-The Main 3D Viewport is the primary interactive 3D view occupying the center region of the SketchCraft application window. It displays the 3D model scene with real-time WebGL rendering, allowing users to visualize and interact with their geometry. This component orchestrates the rendering pipeline, handles view state, manages visual overlays (grid, axes, guides, annotations), and translates user input into 3D spatial operations.
+The Main 3D Viewport is the primary interactive 3D view occupying the center region of the DraftDown application window. It displays the 3D model scene with real-time WebGL rendering, allowing users to visualize and interact with their geometry. This component orchestrates the rendering pipeline, handles view state, manages visual overlays (grid, axes, guides, annotations), and translates user input into 3D spatial operations.
 
 ## Responsibilities
 

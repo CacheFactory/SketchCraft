@@ -1,5 +1,5 @@
 // @archigraph op.subdivide
-// Mesh subdivision operation for SketchCraft
+// Mesh subdivision operation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex, IEdge } from '../../src/core/interfaces';

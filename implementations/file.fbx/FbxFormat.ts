@@ -1,5 +1,5 @@
 // @archigraph file.fbx
-// FBX binary format import/export for SketchCraft
+// FBX binary format import/export for DraftDown
 // Supports FBX 7400+ (import) and FBX 7500 (export) binary formats.
 
 import { Vec3, MaterialDef } from '../../src/core/types';
@@ -733,7 +733,7 @@ export function exportFbx(
   materials: MaterialDef[] = [],
   options: FbxExportOptions = {},
 ): ArrayBuffer {
-  const { title = 'SketchCraft Model', creator = 'SketchCraft' } = options;
+  const { title = 'DraftDown Model', creator = 'DraftDown' } = options;
 
   // Collect geometry data
   const vertexPositions: number[] = [];

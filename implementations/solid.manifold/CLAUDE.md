@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Manifold Solid Engine is the core computational geometry component responsible for robust CSG (Constructive Solid Geometry) boolean operations in SketchCraft. It wraps the Manifold library (compiled to WebAssembly) to perform high-performance solid modeling operations on 3D geometry.
+The Manifold Solid Engine is the core computational geometry component responsible for robust CSG (Constructive Solid Geometry) boolean operations in DraftDown. It wraps the Manifold library (compiled to WebAssembly) to perform high-performance solid modeling operations on 3D geometry.
 
-This component acts as the bridge between SketchCraft's B-Rep geometry representation and Manifold's mesh-based processing. It validates input geometry, performs transformations, executes operations, and converts results back to the application's native format.
+This component acts as the bridge between DraftDown's B-Rep geometry representation and Manifold's mesh-based processing. It validates input geometry, performs transformations, executes operations, and converts results back to the application's native format.
 
 **Component ID**: `solid.manifold` (uuid: `TECynygY`)  
 **Layer**: geometry  
@@ -16,8 +16,8 @@ This component acts as the bridge between SketchCraft's B-Rep geometry represent
 ## Responsibilities
 
 ### Geometry Conversion
-- Convert SketchCraft B-Rep geometry to Manifold mesh format
-- Convert Manifold mesh results back to SketchCraft B-Rep geometry
+- Convert DraftDown B-Rep geometry to Manifold mesh format
+- Convert Manifold mesh results back to DraftDown B-Rep geometry
 - Preserve geometry metadata, material assignments, and topology references during round-trip conversion
 
 ### Boolean Operations
@@ -59,8 +59,8 @@ Must expose methods that:
 ### Conversion Methods
 
 Must expose methods that:
-- Convert from SketchCraft B-Rep to Manifold mesh format
-- Convert from Manifold mesh format back to SketchCraft B-Rep
+- Convert from DraftDown B-Rep to Manifold mesh format
+- Convert from Manifold mesh format back to DraftDown B-Rep
 - Handle edge cases: degenerate faces, coincident vertices, floating-point precision issues
 
 ---
@@ -69,7 +69,7 @@ Must expose methods that:
 
 ### Input Geometry Format
 
-Accepts SketchCraft B-Rep geometry containing:
+Accepts DraftDown B-Rep geometry containing:
 - Face definitions with vertex indices
 - Vertex positions as float64 coordinates
 - Face normal vectors
@@ -78,7 +78,7 @@ Accepts SketchCraft B-Rep geometry containing:
 
 ### Output Geometry Format
 
-Returns SketchCraft B-Rep geometry containing:
+Returns DraftDown B-Rep geometry containing:
 - Modified or new face definitions
 - Updated vertex positions and normals
 - Preserved or updated material/layer assignments
@@ -109,7 +109,7 @@ Returns structured error objects containing:
 ### Representation
 - Primary representation: CSG operations on solid bodies
 - Internal processing: mesh-based via Manifold library
-- Output: B-Rep compatible with SketchCraft's geometry model
+- Output: B-Rep compatible with DraftDown's geometry model
 
 ---
 
@@ -205,7 +205,7 @@ Optimizations must leverage:
 This component must implement:
 
 1. **B-Rep to Manifold Converter**
-   - Transform SketchCraft face/vertex data to Manifold mesh format
+   - Transform DraftDown face/vertex data to Manifold mesh format
    - Handle coordinate system transformations if needed
    - Preserve topology and metadata associations
 

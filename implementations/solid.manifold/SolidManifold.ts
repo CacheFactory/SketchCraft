@@ -1,5 +1,5 @@
 // @archigraph op.manifold-check
-// Manifold solid validation for SketchCraft
+// Manifold solid validation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IEdge, IVertex, IMesh } from '../../src/core/interfaces';

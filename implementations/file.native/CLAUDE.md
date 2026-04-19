@@ -1,4 +1,4 @@
-# SketchCraft Native Format (.scf)
+# DraftDown Native Format (.scf)
 
 **Component ID**: `file.native` (uuid: `GmIenGm4`)  
 **Layer**: data  
@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The SketchCraft native file format (.scf) is a custom binary format for persisting and loading 3D models in SketchCraft. It must provide fast, reliable serialization of all model data including geometry, materials, scene structure, and metadata, with support for incremental saves to minimize write times for large models.
+The DraftDown native file format (.scf) is a custom binary format for persisting and loading 3D models in DraftDown. It must provide fast, reliable serialization of all model data including geometry, materials, scene structure, and metadata, with support for incremental saves to minimize write times for large models.
 
 ## Responsibilities
 

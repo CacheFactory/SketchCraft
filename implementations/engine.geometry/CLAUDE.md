@@ -9,7 +9,7 @@
 
 ## Responsibility
 
-This component is the **primary geometric kernel** for SketchCraft. It implements a B-Rep (Boundary Representation) data structure using a half-edge mesh topology, similar to SketchUp's internal model. It is responsible for maintaining topologically valid 3D geometry, performing spatial queries, and exposing APIs that modeling operations use to create, modify, and analyze geometry.
+This component is the **primary geometric kernel** for DraftDown. It implements a B-Rep (Boundary Representation) data structure using a half-edge mesh topology, similar to SketchUp's internal model. It is responsible for maintaining topologically valid 3D geometry, performing spatial queries, and exposing APIs that modeling operations use to create, modify, and analyze geometry.
 
 This is a **performance-critical** component. All modeling operations — extrude, sweep, boolean, fillet, chamfer, subdivide, triangulate, offset, intersect, and modifiers (array, mirror, smooth) — depend on this engine for geometry manipulation.
 

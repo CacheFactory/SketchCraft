@@ -1,5 +1,5 @@
 // @archigraph op.array
-// Linear and polar array modifier for SketchCraft
+// Linear and polar array modifier for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex, IEdge } from '../../src/core/interfaces';

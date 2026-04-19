@@ -60,7 +60,7 @@ Must handle:
 **Manifold Solid Engine** (`solid.manifold`)
 - Must convert geometry to Manifold's mesh format
 - Must call Manifold's boolean subtraction function
-- Must convert result back to SketchCraft's geometry representation
+- Must convert result back to DraftDown's geometry representation
 - Relies on Manifold for all geometric robustness guarantees
 
 **Core Geometry Engine** (`engine.geometry`)
@@ -120,7 +120,7 @@ Must handle:
 - Marked as "very-complex" (`x.impl.complexity`)
 - Complexity stems from:
   - Robust handling of geometric edge cases
-  - Integration with two different geometry representations (SketchCraft + Manifold)
+  - Integration with two different geometry representations (DraftDown + Manifold)
   - Performance requirements for interactive use
   - Correctness guarantees for watertight results
   - Preview mode coordination
@@ -129,7 +129,7 @@ Must handle:
 
 This operation does not contain major sub-components that must be implemented within this codebase. The core CSG logic is delegated to Manifold. This component focuses on:
 
-- Geometry conversion (SketchCraft ↔ Manifold formats)
+- Geometry conversion (DraftDown ↔ Manifold formats)
 - Operation orchestration
 - Error handling and edge case management
 - Integration with history and preview systems

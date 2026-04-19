@@ -96,12 +96,12 @@ off(event: string, handler: Function): void
 
 ### Reads From
 
-- **Local File System** (uuid: `ltD2VRC4`): Load scene graph from .sketchcraft files (deserialize entities, groups, components, layers, pages)
+- **Local File System** (uuid: `ltD2VRC4`): Load scene graph from .draftdown files (deserialize entities, groups, components, layers, pages)
 - **Preferences Store** (uuid: `q4TmwrBi`): Retrieve default layer settings, last active page, recent component libraries
 
 ### Writes To
 
-- **Local File System** (uuid: `pP0K4wyA`): Persist scene graph to .sketchcraft files (serialize all entities, preserve component references, maintain transform hierarchies)
+- **Local File System** (uuid: `pP0K4wyA`): Persist scene graph to .draftdown files (serialize all entities, preserve component references, maintain transform hierarchies)
 
 ## Data Classification
 

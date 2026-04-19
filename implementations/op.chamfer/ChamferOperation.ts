@@ -1,5 +1,5 @@
 // @archigraph op.chamfer
-// Edge chamfering operation for SketchCraft
+// Edge chamfering operation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IEdge, IVertex } from '../../src/core/interfaces';

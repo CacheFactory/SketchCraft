@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Paint Bucket Tool is an interactive tool that allows users to apply materials and colors to 3D geometry faces in the SketchCraft CAD application. It supports multiple interaction modes: single-face painting, material sampling, bulk application to matching materials, and flood-fill to connected faces. Materials include visual properties like albedo color, texture maps, opacity, and physically-based rendering (PBR) parameters.
+The Paint Bucket Tool is an interactive tool that allows users to apply materials and colors to 3D geometry faces in the DraftDown CAD application. It supports multiple interaction modes: single-face painting, material sampling, bulk application to matching materials, and flood-fill to connected faces. Materials include visual properties like albedo color, texture maps, opacity, and physically-based rendering (PBR) parameters.
 
 This tool is activated via keyboard shortcut `B` or by clicking its icon in the main toolbar (`toolbar.main`). When active, the cursor changes to a pointer style.
 
@@ -161,7 +161,7 @@ None — this is a leaf component. All functionality is contained within this to
 
 ## Existing Code References
 
-No existing code paths specified. This is a new implementation within the SketchCraft architecture.
+No existing code paths specified. This is a new implementation within the DraftDown architecture.
 
 ## Implementation Constraints
 

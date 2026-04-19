@@ -40,9 +40,9 @@ The Boolean Union operation merges two solid groups or components into a single 
 
 ### Manifold Solid Engine (`solid.manifold`)
 
-- **Mesh conversion**: Convert SketchCraft solid data to Manifold mesh format
+- **Mesh conversion**: Convert DraftDown solid data to Manifold mesh format
 - **Boolean computation**: `manifold.union(meshA, meshB)` — core CSG operation
-- **Result conversion**: Convert Manifold result back to SketchCraft geometry
+- **Result conversion**: Convert Manifold result back to DraftDown geometry
 - **Error handling**: Interpret Manifold errors (non-manifold input, computation failure)
 
 ### Core Geometry Engine (`engine.geometry`)
@@ -134,10 +134,10 @@ All implementation resides within this component's codebase. Sub-modules to impl
 
 ### 2. Manifold Adapter
 
-- Convert SketchCraft mesh format to Manifold's expected structure (vertex arrays, index arrays)
+- Convert DraftDown mesh format to Manifold's expected structure (vertex arrays, index arrays)
 - Apply world-space transforms if needed (union operates in world coordinates)
 - Invoke Manifold's union API with appropriate error handling
-- Convert Manifold result back to SketchCraft format
+- Convert Manifold result back to DraftDown format
 - Map Manifold errors to user-facing messages ("Non-manifold input detected on Solid A")
 
 ### 3. Geometry Writer

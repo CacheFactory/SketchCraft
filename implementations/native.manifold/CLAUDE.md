@@ -1,6 +1,6 @@
 # Manifold WASM Module
 
-This component provides the WebAssembly interface to the Manifold geometry kernel, enabling high-performance CSG (Constructive Solid Geometry) boolean operations on triangle meshes within SketchCraft. It bridges the JavaScript runtime with the compiled C++ Manifold library.
+This component provides the WebAssembly interface to the Manifold geometry kernel, enabling high-performance CSG (Constructive Solid Geometry) boolean operations on triangle meshes within DraftDown. It bridges the JavaScript runtime with the compiled C++ Manifold library.
 
 ## Responsibilities
 

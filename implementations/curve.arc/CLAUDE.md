@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Arc Curve component represents circular arc geometry in the SketchCraft 3D CAD system. It stores parametric definitions of circular arcs and circles, and generates polyline approximations for rendering and geometric operations. This component maintains the mathematical representation of arcs so they can be recognized, manipulated, and re-segmented as true circular geometry rather than just polylines.
+The Arc Curve component represents circular arc geometry in the DraftDown 3D CAD system. It stores parametric definitions of circular arcs and circles, and generates polyline approximations for rendering and geometric operations. This component maintains the mathematical representation of arcs so they can be recognized, manipulated, and re-segmented as true circular geometry rather than just polylines.
 
 ## Responsibilities
 

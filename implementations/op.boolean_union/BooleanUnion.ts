@@ -1,5 +1,5 @@
 // @archigraph op.boolean.union
-// CSG Union operation for SketchCraft — delegates to Manifold WASM
+// CSG Union operation for DraftDown — delegates to Manifold WASM
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IVertex } from '../../src/core/interfaces';

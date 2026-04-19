@@ -1,5 +1,5 @@
 // @archigraph op.boolean.intersect
-// CSG Intersection operation for SketchCraft — delegates to Manifold WASM
+// CSG Intersection operation for DraftDown — delegates to Manifold WASM
 
 import { IGeometryEngine } from '../../src/core/interfaces';
 import {

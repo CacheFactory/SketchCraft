@@ -6,7 +6,7 @@
 
 ## What This Component Is
 
-This component provides FBX (Autodesk Filmbox) file format import and export capabilities for SketchCraft. FBX is a widely-used 3D interchange format compatible with major 3D applications including 3ds Max, Maya, Blender, and game engines. This component enables bidirectional data exchange between SketchCraft and these external tools.
+This component provides FBX (Autodesk Filmbox) file format import and export capabilities for DraftDown. FBX is a widely-used 3D interchange format compatible with major 3D applications including 3ds Max, Maya, Blender, and game engines. This component enables bidirectional data exchange between DraftDown and these external tools.
 
 ## Responsibilities
 
@@ -16,7 +16,7 @@ This component provides FBX (Autodesk Filmbox) file format import and export cap
 - Extract material definitions and properties
 - Reconstruct scene hierarchy (nodes, transforms, parent-child relationships)
 - Import basic animation data (keyframes, curves)
-- Convert FBX data structures into SketchCraft's internal representation
+- Convert FBX data structures into DraftDown's internal representation
 
 ### Export Operations
 - Write binary FBX files to the local file system
@@ -36,7 +36,7 @@ Must expose methods to:
 
 ### Export API
 Must expose methods to:
-- Accept SketchCraft scene data (geometry, materials, hierarchy)
+- Accept DraftDown scene data (geometry, materials, hierarchy)
 - Convert internal representations to FBX format
 - Write FBX binary data to a specified file path
 - Support options for binary encoding and texture embedding
@@ -63,10 +63,10 @@ Format-specific options as JSON:
 ### External Libraries
 - **fbx-parser library**: Must be used for binary FBX decoding
 - This library handles low-level FBX binary format parsing
-- Component must wrap this library and translate between FBX structures and SketchCraft's data model
+- Component must wrap this library and translate between FBX structures and DraftDown's data model
 
 ### Internal Dependencies
-- Must integrate with SketchCraft's geometry representation system
+- Must integrate with DraftDown's geometry representation system
 - Must integrate with material system for property mapping
 - Must integrate with scene graph for hierarchy reconstruction
 
@@ -80,9 +80,9 @@ Must handle:
 - **Animation nodes**: Keyframe data, animation curves (basic support)
 
 ### Internal Data Mapping
-- Map FBX coordinate system to SketchCraft coordinate system
-- Convert FBX material properties to SketchCraft material model
-- Translate FBX transform matrices to SketchCraft transform representation
+- Map FBX coordinate system to DraftDown coordinate system
+- Convert FBX material properties to DraftDown material model
+- Translate FBX transform matrices to DraftDown transform representation
 - Handle unit conversions if necessary
 
 ## Constraints and Requirements

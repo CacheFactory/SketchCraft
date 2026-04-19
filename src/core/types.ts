@@ -1,5 +1,5 @@
 // @archigraph core-types
-// Core type definitions for SketchCraft
+// Core type definitions for DraftDown
 
 export type Vec3 = { x: number; y: number; z: number };
 export type Vec2 = { x: number; y: number };

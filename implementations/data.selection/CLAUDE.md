@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Selection Manager (`data.selection`) maintains the current selection state for the SketchCraft 3D modeling application. It tracks which entities (vertices, edges, faces, groups, component instances) are currently selected by the user, supports multiple selection modes, and broadcasts selection change events to dependent UI and rendering components.
+The Selection Manager (`data.selection`) maintains the current selection state for the DraftDown 3D modeling application. It tracks which entities (vertices, edges, faces, groups, component instances) are currently selected by the user, supports multiple selection modes, and broadcasts selection change events to dependent UI and rendering components.
 
 ## Responsibilities
 

@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Distance Constraint is a numerical input and constraint system that allows users to specify exact distances during drawing, moving, and modeling operations. When a user types a number while a tool is active, the constraint locks the current operation to that precise distance value. This is SketchCraft's implementation of the "Value Control Box" (VCB) pattern found in professional CAD applications.
+The Distance Constraint is a numerical input and constraint system that allows users to specify exact distances during drawing, moving, and modeling operations. When a user types a number while a tool is active, the constraint locks the current operation to that precise distance value. This is DraftDown's implementation of the "Value Control Box" (VCB) pattern found in professional CAD applications.
 
 The constraint displays the current measurement in the measurements panel at the bottom of the screen and accepts typed numeric input to snap operations to exact values.
 

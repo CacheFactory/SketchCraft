@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Main Window (`window.main`) is the primary application window for SketchCraft, a local desktop 3D CAD application. It hosts the entire user interface including the 3D viewport, toolbars, panels, and menus within a single Electron renderer process window. This component orchestrates the UI shell — layout management, panel docking, window lifecycle, and theme application — while delegating 3D rendering to the Main 3D Viewport component.
+The Main Window (`window.main`) is the primary application window for DraftDown, a local desktop 3D CAD application. It hosts the entire user interface including the 3D viewport, toolbars, panels, and menus within a single Electron renderer process window. This component orchestrates the UI shell — layout management, panel docking, window lifecycle, and theme application — while delegating 3D rendering to the Main 3D Viewport component.
 
 The window uses a flexbox-based docking layout with resizable panels: the 3D viewport occupies the center, toolbars are positioned at top and left, and panels dock to the right side. All UI is built with React and TypeScript, running in an Electron renderer process with `contextIsolation: true` and `nodeIntegration: false`.
 
@@ -105,7 +105,7 @@ Bottom status bar showing the VCB (Value Control Box):
 ### Window Lifecycle
 - Must initialize as an Electron renderer process with the following BrowserWindow options:
   - Dimensions: 1400×900, minimum 800×600
-  - Title: "SketchCraft"
+  - Title: "DraftDown"
   - `webPreferences`: `nodeIntegration: false`, `contextIsolation: true`, `preload: "preload.js"`
   - DevTools enabled for development builds
 

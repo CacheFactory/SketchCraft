@@ -93,7 +93,7 @@ export class Application implements IApplication {
     this.setupIPCListeners();
 
     this.initialized = true;
-    console.log('SketchCraft initialized successfully');
+    console.log('DraftDown initialized successfully');
   }
 
   private registerTools(): void {
@@ -320,7 +320,7 @@ export class Application implements IApplication {
   /** Export current geometry to OBJ format as ArrayBuffer */
   private exportOBJ(): ArrayBuffer {
     const mesh = this.document.geometry.getMesh();
-    const lines: string[] = ['# SketchCraft OBJ Export'];
+    const lines: string[] = ['# DraftDown OBJ Export'];
 
     // Map vertex IDs to OBJ indices (1-based)
     const vertexIndex = new Map<string, number>();

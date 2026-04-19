@@ -1,5 +1,5 @@
 // @archigraph file.stl-format
-// STL (stereolithography) import/export for SketchCraft
+// STL (stereolithography) import/export for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IMesh, IVertex, IFace } from '../../src/core/interfaces';
@@ -57,7 +57,7 @@ function computeNormal(v1: Vec3, v2: Vec3, v3: Vec3): Vec3 {
 // ─── Binary STL Export ──────────────────────────────────────────
 
 export function exportStlBinary(mesh: IMesh, options: StlExportOptions = {}): ArrayBuffer {
-  const { name = 'SketchCraft Export' } = options;
+  const { name = 'DraftDown Export' } = options;
 
   // Collect all triangles from faces
   const allTriangles: Array<{ normal: Vec3; v1: Vec3; v2: Vec3; v3: Vec3 }> = [];
@@ -119,7 +119,7 @@ export function exportStlBinary(mesh: IMesh, options: StlExportOptions = {}): Ar
 // ─── ASCII STL Export ───────────────────────────────────────────
 
 export function exportStlAscii(mesh: IMesh, options: StlExportOptions = {}): string {
-  const { name = 'SketchCraft' } = options;
+  const { name = 'DraftDown' } = options;
   const lines: string[] = [];
   lines.push(`solid ${name}`);
 

@@ -16,7 +16,7 @@ test.afterAll(async () => {
 
 test('app window opens with correct title', async () => {
   const title = await page.title();
-  expect(title).toBe('SketchCraft');
+  expect(title).toBe('DraftDown');
 });
 
 test('app window has correct minimum dimensions', async () => {

@@ -1,5 +1,5 @@
 // @archigraph engine.geometry
-// Vector and math utilities for SketchCraft
+// Vector and math utilities for DraftDown
 
 import { Vec3, Vec2, Plane, Ray, BoundingBox } from './types';
 

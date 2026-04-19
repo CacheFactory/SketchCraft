@@ -1,5 +1,5 @@
 // @archigraph op.intersect-faces
-// Face intersection operation for SketchCraft
+// Face intersection operation for DraftDown
 
 import { Vec3, Plane, BoundingBox } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex, IEdge } from '../../src/core/interfaces';

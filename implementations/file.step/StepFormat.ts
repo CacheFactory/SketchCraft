@@ -1,5 +1,5 @@
 // @archigraph file.step-format
-// STEP (ISO 10303) format stub for SketchCraft
+// STEP (ISO 10303) format stub for DraftDown
 // Delegates to OpenCascade WASM via native bridge for actual processing.
 
 import { Vec3 } from '../../src/core/types';
@@ -45,7 +45,7 @@ export async function importStep(data: ArrayBuffer): Promise<StepImportResult> {
   } catch {
     throw new Error(
       'STEP import requires the OpenCascade WASM module. ' +
-      'Install @sketchcraft/opencascade-wasm and ensure the native bridge is configured.',
+      'Install @draftdown/opencascade-wasm and ensure the native bridge is configured.',
     );
   }
 }
@@ -62,7 +62,7 @@ export async function importStep(data: ArrayBuffer): Promise<StepImportResult> {
 export function exportStep(): never {
   throw new Error(
     'STEP export is not supported. ' +
-    'SketchCraft uses faceted mesh geometry internally. ' +
+    'DraftDown uses faceted mesh geometry internally. ' +
     'Converting mesh data to STEP B-Rep solids requires OpenCascade ' +
     'and is not yet implemented. Consider exporting to glTF or OBJ instead.',
   );

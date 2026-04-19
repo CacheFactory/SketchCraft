@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-A file format handler that imports and exports 3D models in the STL (STereoLithography) format for 3D printing workflows. This component bridges SketchCraft's internal triangle mesh representation with the STL file format used by 3D printers and slicing software.
+A file format handler that imports and exports 3D models in the STL (STereoLithography) format for 3D printing workflows. This component bridges DraftDown's internal triangle mesh representation with the STL file format used by 3D printers and slicing software.
 
 The handler must support both reading STL files (ASCII and binary variants) into the application's internal mesh structure and writing internal meshes out to binary STL files.
 
@@ -57,7 +57,7 @@ The handler must respect these options (provided as JSON):
 - Coordinate units should match internal representation (assumed to be millimeters for 3D printing)
 
 ### Internal Mesh Data Structure
-The component must interface with SketchCraft's internal triangle mesh representation. This structure is not defined here but must support:
+The component must interface with DraftDown's internal triangle mesh representation. This structure is not defined here but must support:
 - Enumeration of all faces/triangles
 - Access to vertex positions (3D coordinates)
 - Face triangulation operations (converting n-gons to triangles)
@@ -117,5 +117,5 @@ The component is tested by `test.e2e.file_io` (ID: test.e2e.file_io), which must
 - **Language**: TypeScript
 - **Complexity**: Simple — focused file format handler with well-defined structure
 - **No cloud dependencies**: all processing occurs locally in the Electron application
-- The component should integrate cleanly with SketchCraft's existing file I/O architecture
+- The component should integrate cleanly with DraftDown's existing file I/O architecture
 - Consider streaming or chunked processing for very large STL files to maintain UI responsiveness

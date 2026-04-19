@@ -94,7 +94,7 @@ This constraint applies **only during construction**. Once a line segment is com
 
 ## Implementation Language
 
-TypeScript — must integrate with existing SketchCraft Electron/Three.js architecture.
+TypeScript — must integrate with existing DraftDown Electron/Three.js architecture.
 
 ## Complexity Classification
 

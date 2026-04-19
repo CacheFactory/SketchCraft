@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Main Renderer Process (`process.renderer`) is the Electron renderer process responsible for running the entire SketchCraft application user interface and core application logic. This process hosts the React UI framework, manages the Three.js-based 3D viewport, orchestrates the tool system, coordinates all data managers, and serves as the integration point for all user-facing functionality.
+The Main Renderer Process (`process.renderer`) is the Electron renderer process responsible for running the entire DraftDown application user interface and core application logic. This process hosts the React UI framework, manages the Three.js-based 3D viewport, orchestrates the tool system, coordinates all data managers, and serves as the integration point for all user-facing functionality.
 
 This is a complex, multi-subsystem process that acts as the application's central nervous system — bridging user input, 3D rendering, geometry processing, document management, and inter-process communication.
 

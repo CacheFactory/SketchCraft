@@ -1,6 +1,6 @@
 # Model Document
 
-The **Model Document** (`data.document`) is the in-memory representation of an open project file — the single source of truth for all model state in SketchCraft. It owns and coordinates all scene, selection, history, and material data for a design session.
+The **Model Document** (`data.document`) is the in-memory representation of an open project file — the single source of truth for all model state in DraftDown. It owns and coordinates all scene, selection, history, and material data for a design session.
 
 ---
 
@@ -106,7 +106,7 @@ Each sub-manager must provide its own interface contract (see respective compone
 ### Reads From
 
 **Local File System** (`datastore.filesystem`):
-- Native `.sketchcraft` project files
+- Native `.draftdown` project files
 - Imported file formats (`.skp`, `.obj`, `.dae`, `.ifc`, etc.)
 - Auto-save temporary files in system temp directory
 
@@ -118,8 +118,8 @@ Each sub-manager must provide its own interface contract (see respective compone
 ### Writes To
 
 **Local File System** (`datastore.filesystem`):
-- Native `.sketchcraft` project files on save/saveAs
-- Auto-save temporary files (format: `.sketchcraft-autosave-{timestamp}`)
+- Native `.draftdown` project files on save/saveAs
+- Auto-save temporary files (format: `.draftdown-autosave-{timestamp}`)
 - Exported files in various formats
 
 ---
@@ -150,7 +150,7 @@ IModelDocument
 
 ## File Format
 
-### Native Format (`.sketchcraft`)
+### Native Format (`.draftdown`)
 
 The document must serialize to a binary format containing:
 
@@ -170,7 +170,7 @@ The document must serialize to a binary format containing:
 
 Auto-save files must:
 - Use the same serialization as native format
-- Be written to `app.getPath('temp')` with naming convention `.sketchcraft-autosave-{filePath}-{timestamp}`
+- Be written to `app.getPath('temp')` with naming convention `.draftdown-autosave-{filePath}-{timestamp}`
 - Be created every `autoSaveIntervalMs` (default 300,000 ms = 5 minutes)
 - Include full document state to enable complete recovery
 - Be cleaned up after successful manual save or document close

@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-A custom GLSL fragment shader that implements physically-based rendering (PBR) for SketchUp-inspired 3D geometry. This shader extends Three.js `MeshStandardMaterial` using the `onBeforeCompile` hook to inject SketchCraft-specific rendering features while retaining PBR fundamentals.
+A custom GLSL fragment shader that implements physically-based rendering (PBR) for SketchUp-inspired 3D geometry. This shader extends Three.js `MeshStandardMaterial` using the `onBeforeCompile` hook to inject DraftDown-specific rendering features while retaining PBR fundamentals.
 
 **Archigraph ID**: `shader.pbr` (uuid: `C65BEFgu`)
 

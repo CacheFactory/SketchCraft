@@ -1,6 +1,6 @@
 # Half-Edge Mesh (mesh.halfedge)
 
-The Half-Edge Mesh is the primary mesh data structure for SketchCraft's geometry layer. It uses a half-edge (doubly-connected edge list / DCEL) representation to enable efficient topology queries and modifications required by modeling operations, inference systems, and rendering pipelines.
+The Half-Edge Mesh is the primary mesh data structure for DraftDown's geometry layer. It uses a half-edge (doubly-connected edge list / DCEL) representation to enable efficient topology queries and modifications required by modeling operations, inference systems, and rendering pipelines.
 
 ## Purpose
 

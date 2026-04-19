@@ -1,10 +1,10 @@
 # STEP Format Import
 
-This component reads STEP (ISO 10303) CAD files and converts their B-Rep solid geometry into SketchCraft's mesh-based internal representation.
+This component reads STEP (ISO 10303) CAD files and converts their B-Rep solid geometry into DraftDown's mesh-based internal representation.
 
 ## Responsibility
 
-Parse STEP files containing mechanical CAD data and produce SketchCraft mesh geometry. Handle part assemblies, hierarchical structure, material colors, and coordinate system transformations. This is an import-only capability — SketchCraft's mesh representation cannot be reliably converted back to NURBS-based STEP geometry.
+Parse STEP files containing mechanical CAD data and produce DraftDown mesh geometry. Handle part assemblies, hierarchical structure, material colors, and coordinate system transformations. This is an import-only capability — DraftDown's mesh representation cannot be reliably converted back to NURBS-based STEP geometry.
 
 ## File Format
 
@@ -19,11 +19,11 @@ Parse STEP files containing mechanical CAD data and produce SketchCraft mesh geo
 - User-selected STEP file path provided at import time
 - File contains STEP AP203 or AP214 protocol geometry
 
-**Produces**: SketchCraft scene geometry
+**Produces**: DraftDown scene geometry
 - Triangle meshes representing tessellated solids
 - Assembly hierarchy with part names and transforms
 - Material colors (RGB) extracted from STEP attributes
-- Coordinate transforms applied to convert STEP world space to SketchCraft units
+- Coordinate transforms applied to convert STEP world space to DraftDown units
 
 ## API Surface
 
@@ -40,7 +40,7 @@ Must provide a function or class exposing:
 
 **Configuration options**:
 - Tessellation tolerance (controls mesh density from NURBS surfaces)
-- Unit conversion (e.g., mm → SketchCraft world units)
+- Unit conversion (e.g., mm → DraftDown world units)
 - Assembly flattening vs. hierarchy preservation
 - Color/material import toggle
 
@@ -51,10 +51,10 @@ Must provide a function or class exposing:
 - Access via Node.js native addon (e.g., `node-occ` or custom binding)
 - Provides STEP reader (`STEPControl_Reader`), shape analysis, and tessellation (`BRepMesh_IncrementalMesh`)
 
-**SketchCraft geometry pipeline**:
+**DraftDown geometry pipeline**:
 - Must convert OCCT topology (`TopoDS_Shape`) to triangle meshes
 - Apply transforms from assembly structure
-- Integrate with SketchCraft's scene graph and material system
+- Integrate with DraftDown's scene graph and material system
 
 ## Technical Constraints
 
@@ -100,7 +100,7 @@ Must provide a function or class exposing:
 **Depends on**:
 - `datastore.filesystem` for file read operations
 - OpenCascade native module for STEP parsing
-- SketchCraft scene graph for geometry insertion
+- DraftDown scene graph for geometry insertion
 - Material system for color assignment
 
 **Tested by**:
@@ -126,16 +126,16 @@ Must implement within this codebase:
 3. **Assembly Processor**
    - Traverses STEP assembly graph (`XCAFDoc_ShapeTool`)
    - Extracts part names, instance transforms, and references
-   - Builds SketchCraft scene hierarchy
+   - Builds DraftDown scene hierarchy
 
 4. **Material Extractor**
    - Reads color assignments from STEP attributes (`XCAFDoc_ColorTool`)
-   - Maps STEP colors (RGB) to SketchCraft materials
+   - Maps STEP colors (RGB) to DraftDown materials
    - Handles per-part and per-face color assignments
 
 5. **Unit Converter**
    - Detects STEP file units (mm, inches, meters)
-   - Scales geometry to SketchCraft world space
+   - Scales geometry to DraftDown world space
    - Applies coordinate system handedness if needed
 
 6. **Error Reporter**
@@ -150,7 +150,7 @@ Must implement within this codebase:
 - Transforms: 4×4 matrices (translation, rotation, scale)
 - Colors: RGB triplets (0–1 range)
 
-**SketchCraft Mesh**:
+**DraftDown Mesh**:
 - Vertices: `Float32Array` of [x, y, z] coordinates
 - Faces: `Uint32Array` of vertex indices (triangles)
 - Normals: `Float32Array` of [nx, ny, nz] per vertex
@@ -160,7 +160,7 @@ Must implement within this codebase:
 ```typescript
 interface StepImportOptions {
   tessellationTolerance: number;  // e.g., 0.01 for coarse, 0.001 for fine
-  unitScale: number;              // multiplier to convert STEP units to SketchCraft
+  unitScale: number;              // multiplier to convert STEP units to DraftDown
   preserveHierarchy: boolean;     // true to import assembly structure
   importColors: boolean;          // false to ignore STEP color attributes
 }

@@ -6,7 +6,7 @@
 
 ## Purpose
 
-This component provides shared test fixtures and helper functions for all test suites in SketchCraft. It includes pre-built 3D models, mesh generators, validation helpers, and utilities for visual regression and E2E testing. All test code depends on these fixtures to ensure consistent, repeatable test scenarios across integration, performance, visual, and end-to-end tests.
+This component provides shared test fixtures and helper functions for all test suites in DraftDown. It includes pre-built 3D models, mesh generators, validation helpers, and utilities for visual regression and E2E testing. All test code depends on these fixtures to ensure consistent, repeatable test scenarios across integration, performance, visual, and end-to-end tests.
 
 ## Responsibilities
 

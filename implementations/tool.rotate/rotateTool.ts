@@ -156,14 +156,11 @@ export class RotateTool extends BaseTool {
       return;
     }
 
-    // Arrow keys change rotation axis
+    // Arrow keys change rotation axis (toggle behavior: press again to reset to green/Y)
     const prevAxis = this.axisName;
     switch (event.key) {
       case 'ArrowUp':
-        this.axisName = this.axisName === 'green' ? 'green' : 'green';
-        this.axisName = prevAxis === 'green' ? 'green' : 'green';
-        // Toggle: if already green, stay green (default). Otherwise switch to green.
-        this.setAxis('green');
+        this.setAxis(prevAxis === 'green' ? 'green' : 'green');
         break;
       case 'ArrowRight':
         this.setAxis(prevAxis === 'red' ? 'green' : 'red');

@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Offset Tool is an interactive tool in SketchCraft's drawing toolbar that enables users to create offset copies of edges or faces in the 3D modeling environment. It provides a click-drag-release interaction pattern for visually specifying offset distances, keyboard-driven exact distance entry via the VCB (Value Control Box), and double-click repeat functionality for repeated offsets at the same distance.
+The Offset Tool is an interactive tool in DraftDown's drawing toolbar that enables users to create offset copies of edges or faces in the 3D modeling environment. It provides a click-drag-release interaction pattern for visually specifying offset distances, keyboard-driven exact distance entry via the VCB (Value Control Box), and double-click repeat functionality for repeated offsets at the same distance.
 
 This tool translates user input (mouse movements, clicks, keyboard) into geometry operations that create inset or outset copies of edge loops around selected faces.
 
@@ -22,7 +22,7 @@ This tool translates user input (mouse movements, clicks, keyboard) into geometr
 
 ## APIs Exposed
 
-This tool must implement the standard SketchCraft tool interface (exact method signatures to be defined by the tool manager, but typically includes):
+This tool must implement the standard DraftDown tool interface (exact method signatures to be defined by the tool manager, but typically includes):
 
 - `activate()`: Called when tool becomes active
 - `deactivate()`: Called when tool becomes inactive
@@ -163,4 +163,4 @@ Coordinates final invocation of `op.offset` with calculated or entered distance 
 
 ## Existing Code References
 
-None specified. This is a new implementation within the SketchCraft codebase. Follow established patterns from other tools in the `interaction` layer (e.g., push/pull tool, line tool) for consistency in tool lifecycle management, event handling, and preview rendering.
+None specified. This is a new implementation within the DraftDown codebase. Follow established patterns from other tools in the `interaction` layer (e.g., push/pull tool, line tool) for consistency in tool lifecycle management, event handling, and preview rendering.

@@ -1,5 +1,5 @@
 // @archigraph op.mirror
-// Mirror modifier for SketchCraft
+// Mirror modifier for DraftDown
 
 import { Vec3, Plane } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex } from '../../src/core/interfaces';

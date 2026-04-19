@@ -7,7 +7,7 @@
 
 ## Purpose
 
-The Polyline Curve represents a sequence of connected line segments in 3D space. This is the foundational curve type in SketchCraft — all SketchUp-style geometry ultimately reduces to polylines. Circles, arcs, and other curves are represented as segmented polylines with sufficient subdivision to appear smooth.
+The Polyline Curve represents a sequence of connected line segments in 3D space. This is the foundational curve type in DraftDown — all SketchUp-style geometry ultimately reduces to polylines. Circles, arcs, and other curves are represented as segmented polylines with sufficient subdivision to appear smooth.
 
 This component must store an ordered array of 3D points, compute geometric properties (segment count, total length), and provide methods for parametric evaluation, splitting, subdivision, and simplification.
 

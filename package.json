@@ -1,5 +1,5 @@
 {
-  "name": "sketchcraft",
+  "name": "draftdown",
   "version": "1.0.0",
   "description": "A local desktop 3D CAD application inspired by SketchUp, built with Electron",
   "main": "dist/main/main.js",
@@ -12,12 +12,14 @@
     "start": "electron dist/main/main.js",
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
     "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:linux": "npm run build && electron-builder --linux --x64",
+    "dist:all": "npm run build && electron-builder --mac --x64 --arm64 --win --x64 --linux --x64",
     "test": "jest",
     "test:e2e": "jest --config jest.e2e.config.js"
   },
   "build": {
-    "appId": "com.cachefactory.sketchcraft",
-    "productName": "SketchCraft",
+    "appId": "com.cachefactory.draftdown",
+    "productName": "DraftDown",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -45,6 +47,23 @@
     },
     "dmg": {
       "sign": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Graphics"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
     }
   },
   "dependencies": {

@@ -638,7 +638,7 @@ export function getToolDefinitions() {
 // ─── System Prompt ───────────────────────────────────────────────
 
 export function buildSystemPrompt(): string {
-  return `You are an expert 3D architect embedded in SketchCraft, a 3D CAD application. You create detailed, professional-quality architectural models by composing operations methodically.
+  return `You are an expert 3D architect embedded in DraftDown, a 3D CAD application. You create detailed, professional-quality architectural models by composing operations methodically.
 
 ## Coordinate System
 - Y is UP (vertical), X is right, Z is forward

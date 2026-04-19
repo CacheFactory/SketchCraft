@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This test suite benchmarks the performance of SketchCraft's core geometry operations to ensure they meet frame budget constraints and throughput targets. It measures execution time, memory usage, and throughput for mesh creation, extrusion, boolean operations, triangulation, and file I/O at various model complexity scales.
+This test suite benchmarks the performance of DraftDown's core geometry operations to ensure they meet frame budget constraints and throughput targets. It measures execution time, memory usage, and throughput for mesh creation, extrusion, boolean operations, triangulation, and file I/O at various model complexity scales.
 
 ## What This Component Must Do
 

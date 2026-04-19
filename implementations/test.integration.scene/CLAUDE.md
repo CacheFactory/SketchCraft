@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-This is an integration test suite that validates the interaction between core data management systems in SketchCraft: scene management, selection tracking, undo/redo history, material assignment, and the inference engine. These tests run headless and must complete within CI/CD pipelines.
+This is an integration test suite that validates the interaction between core data management systems in DraftDown: scene management, selection tracking, undo/redo history, material assignment, and the inference engine. These tests run headless and must complete within CI/CD pipelines.
 
 Unlike unit tests that isolate single functions, these tests verify that multiple subsystems work together correctly — for example, that creating a group, selecting it, undoing the creation, and redoing it all produces the correct scene graph state and selection events.
 

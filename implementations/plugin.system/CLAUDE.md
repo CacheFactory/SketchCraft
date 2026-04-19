@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Plugin System is the extensibility foundation for SketchCraft. It enables third-party developers to extend the application by loading JavaScript/TypeScript modules from a plugins directory. Plugins can register custom tools, operations, file importers/exporters, UI panels, and menu items through a sandboxed API.
+The Plugin System is the extensibility foundation for DraftDown. It enables third-party developers to extend the application by loading JavaScript/TypeScript modules from a plugins directory. Plugins can register custom tools, operations, file importers/exporters, UI panels, and menu items through a sandboxed API.
 
 This is a **tool plugin** system conforming to API version `1.0`, implemented in TypeScript as a complex, security-critical component.
 
@@ -10,10 +10,10 @@ This is a **tool plugin** system conforming to API version `1.0`, implemented in
 
 - Discover and scan plugin manifests in the plugins directory
 - Load and validate plugin modules at runtime
-- Enforce permission-based access to SketchCraft APIs
+- Enforce permission-based access to DraftDown APIs
 - Provide a sandboxed `PluginAPI` to each loaded plugin
 - Invoke plugin lifecycle methods (`activate`, `deactivate`)
-- Register plugin-provided extensions (tools, operations, file handlers, UI elements) with appropriate SketchCraft subsystems
+- Register plugin-provided extensions (tools, operations, file handlers, UI elements) with appropriate DraftDown subsystems
 - Isolate plugin errors to prevent application crashes
 - Wrap plugin-initiated scene mutations in undo/redo transactions
 - Track loaded plugins and their dependencies
@@ -67,7 +67,7 @@ interface PluginAPI {
 }
 ```
 
-**Registration methods** allow plugins to extend SketchCraft with:
+**Registration methods** allow plugins to extend DraftDown with:
 - Custom tools (via `ITool` interface)
 - Custom operations (via `Operation` interface)
 - File format importers/exporters
@@ -138,7 +138,7 @@ The Plugin System depends on:
 - **UI System**: For rendering plugin panels, dialogs, notifications, and menu items
 - **History/Undo System**: Must wrap `modifyMesh` callbacks in transactions
 
-The Plugin System must integrate with SketchCraft's existing tool, operation, and file format systems by forwarding registered extensions to the appropriate managers.
+The Plugin System must integrate with DraftDown's existing tool, operation, and file format systems by forwarding registered extensions to the appropriate managers.
 
 ## Data Read/Written
 
@@ -178,7 +178,7 @@ The Plugin System must integrate with SketchCraft's existing tool, operation, an
 - The Plugin System **must** intercept and validate all file paths to prevent directory traversal
 
 ### Error Isolation
-- Exceptions in plugin code **must** be caught and logged without crashing SketchCraft
+- Exceptions in plugin code **must** be caught and logged without crashing DraftDown
 - Plugin errors during `activate()` **must** prevent the plugin from loading
 - Plugin errors during runtime **must** disable the plugin and notify the user
 
@@ -188,7 +188,7 @@ The Plugin System must integrate with SketchCraft's existing tool, operation, an
 - Plugin-initiated operations **must** appear in the undo stack with clear attribution
 
 ### Trust Boundaries
-- **Plugin code ↔ SketchCraft Core**: Plugins are untrusted; all inputs must be validated
+- **Plugin code ↔ DraftDown Core**: Plugins are untrusted; all inputs must be validated
 - **Plugin manifest ↔ Plugin System**: Manifests are untrusted; malformed JSON or invalid fields must be rejected
 - **Plugin directory ↔ Host filesystem**: Plugins must not read/write outside their sandbox
 
@@ -208,7 +208,7 @@ The Plugin System must integrate with SketchCraft's existing tool, operation, an
 ### Dependent Components
 - **Select Tool** (`tool.select`): Example of a tool that could be implemented as a plugin (or extended by plugins)
 - **Extrude (Push/Pull)** (`op.extrude`): Example of an operation that could be extended or replaced by plugins
-- **SketchCraft Native Format** (`file.native`): Example of a file handler that could be supplemented by plugin importers/exporters
+- **DraftDown Native Format** (`file.native`): Example of a file handler that could be supplemented by plugin importers/exporters
 
 The Plugin System **extends** these components by allowing third-party code to register additional tools, operations, and file handlers.
 

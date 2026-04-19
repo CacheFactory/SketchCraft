@@ -2,14 +2,14 @@
 
 ## Purpose
 
-This component provides bidirectional glTF 2.0 file format support for SketchCraft. It enables import and export of 3D models in the glTF format, the industry-standard "JPEG of 3D" designed for efficient transmission and rendering of 3D scenes.
+This component provides bidirectional glTF 2.0 file format support for DraftDown. It enables import and export of 3D models in the glTF format, the industry-standard "JPEG of 3D" designed for efficient transmission and rendering of 3D scenes.
 
 ## Responsibilities
 
-- **Import** glTF files (.gltf or .glb) from the local filesystem into SketchCraft's internal scene representation
-- **Export** SketchCraft scenes to glTF format, producing either binary .glb files or text .gltf with separate .bin and texture files
-- Translate between SketchCraft's internal data model and glTF's JSON/binary structure
-- Map SketchCraft PBR materials to glTF PBR metalness/roughness materials and vice versa
+- **Import** glTF files (.gltf or .glb) from the local filesystem into DraftDown's internal scene representation
+- **Export** DraftDown scenes to glTF format, producing either binary .glb files or text .gltf with separate .bin and texture files
+- Translate between DraftDown's internal data model and glTF's JSON/binary structure
+- Map DraftDown PBR materials to glTF PBR metalness/roughness materials and vice versa
 - Handle scene hierarchy, mesh geometry, materials, textures, and transform data
 - Optionally compress mesh data using Draco compression
 - Embed textures in binary glTF files when configured
@@ -32,7 +32,7 @@ Must write:
 - **Binary Format** (.glb): Single-file binary glTF with embedded buffers and textures
 - **Separate Format** (.gltf): JSON descriptor with separate .bin buffer file and texture image files
 - **Geometry Encoding**: Efficient buffer layouts with proper accessors, buffer views
-- **Material Translation**: Convert SketchCraft PBR materials to glTF PBR metalness/roughness specification
+- **Material Translation**: Convert DraftDown PBR materials to glTF PBR metalness/roughness specification
 - **Texture Handling**: Embed textures in .glb or write separate files for .gltf format
 - **Scene Graph**: Node hierarchy with transforms, mesh references
 - **Optional Draco Compression**: Apply Draco mesh compression when enabled
@@ -70,29 +70,29 @@ Default configuration:
 
 ### Internal Data Model
 
-Must consume from SketchCraft's internal scene representation:
+Must consume from DraftDown's internal scene representation:
 - Scene graph nodes with transforms (position, rotation, scale)
 - Mesh geometry (vertices, faces, normals, UVs)
 - PBR material definitions with texture references
 - Texture image data and metadata
 
-Must produce for SketchCraft's internal scene representation:
+Must produce for DraftDown's internal scene representation:
 - Parsed scene hierarchy
 - Decoded mesh geometry
-- Material properties mapped to SketchCraft's PBR system
+- Material properties mapped to DraftDown's PBR system
 - Loaded texture images
 
 ## Material Mapping Requirements
 
-### SketchCraft → glTF
-- Map SketchCraft PBR materials to glTF `pbrMetallicRoughness` workflow
+### DraftDown → glTF
+- Map DraftDown PBR materials to glTF `pbrMetallicRoughness` workflow
 - Translate base color, metallic factor, roughness factor
 - Map normal maps, ambient occlusion maps, emissive properties
 - Handle texture coordinate channels and transforms
 - Set appropriate alpha mode (opaque, blend, mask)
 
-### glTF → SketchCraft
-- Convert glTF PBR materials to SketchCraft's internal PBR representation
+### glTF → DraftDown
+- Convert glTF PBR materials to DraftDown's internal PBR representation
 - Preserve metallic/roughness workflow parameters
 - Load and assign texture maps to appropriate material channels
 - Handle double-sided flags, alpha modes, alpha cutoff values
@@ -107,7 +107,7 @@ Must integrate with Three.js's glTF loader/exporter or equivalent TypeScript-com
 - glTF specification compliance
 - Draco compression/decompression (optional feature)
 
-### SketchCraft Components
+### DraftDown Components
 Depends on:
 - Scene graph representation (read during export, populate during import)
 - Material system for PBR property mapping

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Orbit Tool enables intuitive 3D camera navigation in SketchCraft. It allows users to rotate the camera around the model (orbit), pan the view, and zoom in/out using mouse and keyboard controls. This is a fundamental view manipulation tool for inspecting 3D geometry from different angles.
+The Orbit Tool enables intuitive 3D camera navigation in DraftDown. It allows users to rotate the camera around the model (orbit), pan the view, and zoom in/out using mouse and keyboard controls. This is a fundamental view manipulation tool for inspecting 3D geometry from different angles.
 
 **Component ID**: `tool.orbit` (uuid: `J8odz0eM`)  
 **Layer**: interaction  

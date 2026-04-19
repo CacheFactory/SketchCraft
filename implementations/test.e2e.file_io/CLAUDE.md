@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-This is an end-to-end test suite that validates all file import/export operations in SketchCraft. It ensures that users can reliably save, load, import, and export 3D models across multiple file formats, and that data fidelity is preserved during these operations. This test suite runs in CI/CD pipelines and uses Playwright to drive the actual desktop application through user-facing workflows.
+This is an end-to-end test suite that validates all file import/export operations in DraftDown. It ensures that users can reliably save, load, import, and export 3D models across multiple file formats, and that data fidelity is preserved during these operations. This test suite runs in CI/CD pipelines and uses Playwright to drive the actual desktop application through user-facing workflows.
 
 ## Test Coverage Requirements
 
@@ -63,7 +63,7 @@ This suite requires sample files in the following formats:
 
 ### Components Under Test
 
-- **SketchCraft Native Format (.scf)** (`file.native`): Native save/load roundtrip
+- **DraftDown Native Format (.scf)** (`file.native`): Native save/load roundtrip
 - **OBJ Format** (`file.obj`): Import/export operations
 - **STL Format** (`file.stl`): Import/export operations
 - **glTF Format** (`file.gltf`): Import/export operations

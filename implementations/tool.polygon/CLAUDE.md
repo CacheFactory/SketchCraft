@@ -123,6 +123,6 @@ Tool E2E Tests (`test.e2e.tools`) must verify:
 
 - Language: TypeScript
 - Complexity: Simple
-- Must integrate with existing SketchCraft tool architecture
+- Must integrate with existing DraftDown tool architecture
 - Must respond to tool activation/deactivation events
 - Must respect current drawing context (active plane, units, snap settings)

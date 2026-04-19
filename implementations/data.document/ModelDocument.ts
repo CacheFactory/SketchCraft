@@ -22,7 +22,7 @@ type DocumentEvents = {
 
 // ─── Serialization helpers ───────────────────────────────────────
 
-const MAGIC = 0x534B4346; // 'SKCF' — SketchCraft File
+const MAGIC = 0x534B4346; // 'SKCF' — DraftDown File
 const VERSION = 1;
 
 function encodeString(str: string): Uint8Array {

@@ -1,4 +1,4 @@
-# ArchiGraph Workspace — SketchCraft
+# ArchiGraph Workspace — DraftDown
 
 This workspace contains a SketchUp-inspired 3D CAD application built with Electron + React + Three.js. The architecture is defined in `archigraph.yaml` — **always consult it first** for questions about how the system works.
 

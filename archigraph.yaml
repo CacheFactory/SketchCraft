@@ -1,9 +1,10 @@
 archigraph: '0.3'
 meta:
-  system: SketchCraft
-  description: A local desktop 3D CAD application inspired by SketchUp, built with Electron. Features intuitive push/pull
-    modeling, real-time 3D rendering via Three.js, solid geometry operations via Manifold, and a plugin architecture for extensibility.
-    All computation runs locally — no cloud dependencies.
+  system: DraftDown
+  description: "A free, open-source 3D CAD application built with Electron + React + Three.js.\n    Features push/pull\
+    \ modeling (dual-mode: extrude 2D faces, move 3D faces), drawing tools\n    (line, rectangle, circle, arc, polygon), axis\
+    \ locking, snap system, face splitting,\n    CSG boolean operations via Manifold WASM, and an AI chat assistant. Builds for\n\
+    \    macOS (signed/notarized) and Windows (NSIS installer). All computation runs locally."
   environment:
   - desktop
   tags:
@@ -32,7 +33,7 @@ nodes:
   name: Plugin Developer
   x:
     docs:
-      description: Developer who extends SketchCraft with custom tools, importers/exporters, and rendering modes via the plugin
+      description: Developer who extends DraftDown with custom tools, importers/exporters, and rendering modes via the plugin
         API.
     impl:
       status: implemented
@@ -44,7 +45,7 @@ nodes:
   x:
     electron:
       processType: renderer
-      windowOptions: '{"width": 1400, "height": 900, "minWidth": 800, "minHeight": 600, "title": "SketchCraft", "webPreferences":
+      windowOptions: '{"width": 1400, "height": 900, "minWidth": 800, "minHeight": 600, "title": "DraftDown", "webPreferences":
         {"nodeIntegration": false, "contextIsolation": true, "preload": "preload.js"}}'
       devTools: true
     ui:
@@ -376,9 +377,11 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: Draw circles by clicking center then radius point. Type radius in VCB for exact size. Configurable segment
-        count (default 24, type 's' + number before drawing). Creates a polygon approximation of a circle that forms a face.
-        Inference engine snaps center to existing geometry.
+      description: "Draw circles by clicking center then radius point. Type radius in VCB for exact size.\n          Configurable\
+        \ segment count (default 24, type 's' + number). Arrow keys change drawing plane.\n          Creates edges with intersection\
+        \ detection (createEdgeWithIntersection), groups edges\n          with a shared curveId. Explicitly creates face from\
+        \ vertex loop since autoCreateFaces\n          BFS maxDepth=20 is too small for 24-segment circles. Snaps center to\
+        \ existing geometry."
   uuid: wnTrJPzS
 - id: tool.arc
   kind: tool
@@ -432,9 +435,11 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: "Face extrusion with screen-space Y for distance. Pre-selected face auto-starts.\n          Preview shows\
-        \ dashed top face outline + vertical guide lines. VCB for exact distance.\n          Creates side faces + top cap.\
-        \ resolveSelectedEntityIds for component support."
+      description: "Dual-mode push/pull: 2D standalone faces extrude (create side walls + top cap),\n          3D faces with\
+        \ existing side walls just move vertices (walls stretch automatically).\n          Detects mode via hasSideWalls()\
+        \ — checks adjacent face normals for non-coplanar neighbors.\n          Recomputes face normal from current vertex\
+        \ positions (Newell's method) so push/pull\n          works correctly on rotated geometry. Screen-space Y for distance.\
+        \ Pre-selected face auto-starts.\n          Preview shows top face outline + vertical guide lines. VCB for exact distance."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { Face, Mesh, Edge, Vertex } from '../geometry/mesh';\nimport { Vector3 } from '../math/types';\nimport { InferenceResult\
         \ } from '../geometry/inference';\nimport { ExtrudeOperation, ExtrudeParams, ExtrudeResult } from '../operations/extrude';\n\
@@ -516,8 +521,11 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: "Three-click rotation (center, start angle, drag). Live preview via Rodrigues\n          rotation. VCB\
-        \ for exact degrees. Rotates around Y axis."
+      description: "Three-step rotation: click handle for center, click for start angle, drag to rotate.\n          Arrow\
+        \ keys switch rotation axis: Up=Green/Y, Right=Red/X, Left=Blue/Z, Down=reset.\n          Toggle behavior — pressing\
+        \ same arrow key twice resets to Y. Bounding box handles\n          update to show rotation plane for current axis.\
+        \ Protractor circle + axis line drawn\n          in overlay scene. Rodrigues rotation formula for vertex transforms.\n\
+        \          VCB accepts degrees for exact angle. Handles scale to camera distance."
   uuid: WZyKJ6DX
 - id: tool.scale
   kind: tool
@@ -1149,11 +1157,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: very-complex
-      status: basic
+      status: implemented
     docs:
-      description: 'CSG boolean union — merge two solid groups/components into one. Uses Manifold library via native module
-        for robust boolean operations. Handles edge cases: coincident faces, touching edges, near-miss geometry. Result is
-        a single watertight solid with merged boundaries.'
+      description: "CSG boolean union via ManifoldBridge. Converts region faces to indexed triangle mesh,\n          performs\
+        \ union via Manifold WASM, imports result back as half-edge geometry.\n          Shared helpers: regionToManifoldMesh()\
+        \ and applyManifoldResult(). Async operation.\n          Handles edge cases via Manifold's robust geometric kernel."
   uuid: mwY0P4UZ
 - id: op.boolean_subtract
   kind: operation
@@ -1169,10 +1177,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: very-complex
-      status: basic
+      status: implemented
     docs:
-      description: CSG boolean subtraction — cut one solid from another. Primary solid minus tool solid. Uses Manifold library
-        for robust computation. Handles coincident geometry edge cases. Result is a watertight solid with the tool shape removed.
+      description: "CSG boolean subtraction via ManifoldBridge. Primary solid minus tool solid.\n          Async operation\
+        \ using shared regionToManifoldMesh()/applyManifoldResult() helpers.\n          Result is a watertight solid with the\
+        \ tool shape removed."
   uuid: CTMzXBwQ
 - id: op.boolean_intersect
   kind: operation
@@ -1188,10 +1197,10 @@ nodes:
     impl:
       language: TypeScript
       complexity: very-complex
-      status: basic
+      status: implemented
     docs:
-      description: CSG boolean intersection — keep only the volume shared by two solids. Uses Manifold library. Useful for
-        creating complex shapes from simple primitives.
+      description: "CSG boolean intersection via ManifoldBridge. Keeps only the volume shared by\n          two solids. Async\
+        \ operation using shared helpers. Useful for creating complex\n          shapes from simple primitives."
   uuid: ubWPwaAA
 - id: op.intersect_faces
   kind: operation
@@ -1207,12 +1216,12 @@ nodes:
     impl:
       language: TypeScript
       complexity: very-complex
-      status: basic
+      status: implemented
     docs:
-      description: 'SketchUp''s Intersect Faces command. Computes intersection curves between overlapping geometry and splits
-        faces at intersection lines. Three modes: Intersect with Model (all visible), Intersect with Selection, Intersect
-        with Context (current group/component). Creates new edges at every face-face intersection. Essential for organic modeling
-        workflow.'
+      description: "Face intersection with bounding box acceleration. Three modes: model-wide,\n          selection-only, and\
+        \ context. Plane-plane intersection for coplanar/parallel detection.\n          Clips intersection lines to face boundaries.\
+        \ Splits faces at intersection edges.\n          Handles coplanar face merging. Creates new edges at every face-face\
+        \ intersection."
   uuid: njBTb2Rp
 - id: op.subdivide
   kind: operation
@@ -1226,11 +1235,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Subdivide selected faces by splitting edges and creating new vertices. Supports Catmull-Clark subdivision
-        for smooth surfaces and simple midpoint subdivision for adding detail. Used for organic modeling and smooth surface
-        creation.
+      description: "Catmull-Clark subdivision with boundary edge preservation and crease support.\n          Iterative subdivision\
+        \ with configurable iteration count and face count limits.\n          Computes face points, edge points, and updated\
+        \ vertex positions per the\n          Catmull-Clark algorithm. Boundary vertices use midpoint averaging."
   uuid: CYIk0NpW
 - id: op.triangulate
   kind: operation
@@ -1244,11 +1253,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Triangulate selected faces — split all N-gon faces into triangles. Uses ear-clipping or constrained Delaunay
-        triangulation. Required before STL export and for some rendering operations. Handles faces with holes and non-convex
-        faces.
+      description: "Ear-clipping triangulation with best-fit plane projection for arbitrary polygons.\n          Handles non-convex\
+        \ faces, colinear vertex detection, and hole support.\n          Projects 3D polygon onto 2D using dominant normal\
+        \ axis, then performs\n          ear clipping with convexity and containment checks."
   uuid: xXMBWmbl
 - id: mod.array
   kind: modifier
@@ -1261,11 +1270,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: 'Create linear or radial arrays of selected geometry. Linear array: specify count and spacing or total
-        distance. Radial array: specify count, center, axis, and total angle. Non-destructive — generates instances that update
-        when the source changes. Can be ''applied'' (baked) to convert to real geometry.'
+      description: "Linear and radial arrays with count limits (max 1000). Material preservation\n          on cloned geometry.\
+        \ Vertex merging at boundaries for seamless results.\n          Linear: count + spacing or total distance. Radial:\
+        \ count + center + axis + angle."
   uuid: cr9dEi8q
 - id: mod.mirror
   kind: modifier
@@ -1278,10 +1287,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: simple
-      status: basic
+      status: implemented
     docs:
-      description: Mirror geometry across a plane (X, Y, or Z axis through a point). Non-destructive — mirrored side updates
-        when source changes. Option to merge vertices at the mirror plane for seamless models.
+      description: "Mirror geometry across a plane (X, Y, or Z axis through a point). Material\n          preservation on\
+        \ mirrored faces. Plane validation and degenerate face checks.\n          Option to merge vertices at the mirror plane\
+        \ for seamless models."
   uuid: sRdon4Ok
 - id: mod.smooth
   kind: modifier
@@ -1294,11 +1304,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Soften/smooth edges between faces based on angle threshold. Edges below the threshold angle get smooth
-        normals (like SketchUp's Soften Edges). Above threshold remain hard edges. Also applies Catmull-Clark subdivision
-        for actual geometric smoothing.
+      description: "Actual Catmull-Clark subdivision for geometric smoothing with multi-pass support.\n          Crease edge\
+        \ preservation, boundary handling, configurable iteration count.\n          Also supports angle-based edge softening\
+        \ for smooth normals without subdivision."
   uuid: 1m0uhGig
 - id: constraint.parallel
   kind: constraint
@@ -1403,9 +1413,12 @@ nodes:
       complexity: very-complex
       status: implemented
     docs:
-      description: "B-Rep geometry kernel with half-edge mesh. Auto-face finds ALL coplanar\n          loops (not just shortest).\
-        \ Coplanarity tolerance 0.05. splitFaceWithPath handles edge-point\n          insertion. Guards: no self-edges, no\
-        \ zero-length edges, degenerate face prevention.\n          Serialization for undo/redo snapshots."
+      description: "B-Rep geometry kernel with half-edge mesh. createEdgeWithIntersection detects\n          where\
+        \ new edges cross existing edges, splits them, and uses splitFaceWithPath\n          to split faces when vertices lie\
+        \ on boundary edges. Auto-face BFS finds coplanar\n          loops (maxDepth=20). Coplanarity tolerance 0.05. Face\
+        \ normals stored at creation\n          time — tools must recompute from vertex positions after transforms.\n          Guards:\
+        \ no self-edges, no zero-length edges, degenerate face prevention.\n          Serialization for undo/redo snapshots.\
+        \ 101 integration tests."
       notes: "## Typed Interface\n\n```typescript\nimport { Vector3, Matrix4, Plane, BoundingBox } from '../math/types';\n\
         \n// ========== Core Geometry Types ==========\n\nexport interface GeometryId {\n  readonly id: string; // unique\
         \ stable ID (UUID)\n}\n\nexport interface Vertex extends GeometryId {\n  position: Vector3; // float64\n  edges: HalfEdge[];\
@@ -1528,7 +1541,7 @@ nodes:
       status: basic
     docs:
       description: 'Solid modeling engine using the Manifold library (compiled to WebAssembly) for robust CSG boolean operations.
-        Converts SketchCraft B-Rep geometry to Manifold''s mesh format for boolean operations, then converts back. Handles:
+        Converts DraftDown B-Rep geometry to Manifold''s mesh format for boolean operations, then converts back. Handles:
         union, subtraction, intersection, and minkowski sum. Used for Solid Tools and Push/Pull into existing geometry. Validates
         that input geometry is a proper 2-manifold (watertight) before operations.'
     references: https://github.com/elalish/manifold
@@ -1547,11 +1560,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: simple
-      status: spec-only
+      status: implemented
     docs:
-      description: 'Basic polyline curve — a sequence of connected line segments. All SketchUp-style geometry ultimately reduces
-        to polylines (circles and arcs are segmented polylines). Stores: array of 3D points, segment count, total length.
-        Methods: point at parameter, split at parameter, subdivide, simplify (Ramer-Douglas-Peucker).'
+      description: "Full polyline implementation with parametric evaluation, split at parameter,\n          simplify (Ramer-Douglas-Peucker\
+        \ algorithm), subdivide, closest point computation,\n          bounding box, reverse, and JSON serialization. Supports\
+        \ both open and closed polylines.\n          Used as the base curve type — circles and arcs are segmented polylines."
   uuid: Hog7HfrU
 - id: curve.arc
   kind: curve
@@ -1701,7 +1714,7 @@ nodes:
 - id: file.native
   kind: file_format
   layer: data
-  name: SketchCraft Native Format (.scf)
+  name: DraftDown Native Format (.scf)
   x:
     file:
       format: SKP
@@ -1712,7 +1725,7 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: 'Native file format for SketchCraft (.scf). Binary format with sections: header (version, checksum), geometry
+      description: 'Native file format for DraftDown (.scf). Binary format with sections: header (version, checksum), geometry
         (vertices, edges, faces in B-Rep), materials (definitions + embedded textures), scene structure (groups, components,
         layers), metadata (scenes/pages, camera positions, styles). Uses zlib compression. Supports incremental save (only
         changed sections rewritten). File extension: .scf. Note: uses SKP enum as closest match — this is a custom binary
@@ -1734,7 +1747,7 @@ nodes:
     docs:
       description: 'Wavefront OBJ import/export. Import: reads vertices, normals, UVs, faces, material references (.mtl).
         Export: writes geometry with material assignments. Handles groups as OBJ groups. Supports n-gon faces (no forced triangulation).
-        Material file (.mtl) maps to SketchCraft PBR materials.'
+        Material file (.mtl) maps to DraftDown PBR materials.'
   uuid: fsFhJEJy
 - id: file.stl
   kind: file_format
@@ -1770,7 +1783,7 @@ nodes:
     docs:
       description: 'glTF 2.0 import/export. The ''JPEG of 3D'' — excellent for sharing and web viewing. Import: reads geometry,
         materials (PBR metalness/roughness), textures, scene hierarchy. Export: writes .glb (binary) or .gltf + .bin + textures.
-        Supports Draco mesh compression option. Maps SketchCraft PBR materials to glTF PBR materials.'
+        Supports Draco mesh compression option. Maps DraftDown PBR materials to glTF PBR materials.'
   uuid: 5CEAe10D
 - id: file.dxf
   kind: file_format
@@ -1803,8 +1816,8 @@ nodes:
       status: stub
     docs:
       description: STEP file import for mechanical CAD interoperability. Uses OpenCascade (via native module) to parse STEP
-        files and convert B-Rep solids to SketchCraft mesh geometry. Handles assemblies, part hierarchy, and material colors.
-        Import-only due to SketchCraft's mesh-based (not NURBS-based) internal representation.
+        files and convert B-Rep solids to DraftDown mesh geometry. Handles assemblies, part hierarchy, and material colors.
+        Import-only due to DraftDown's mesh-based (not NURBS-based) internal representation.
   uuid: INzz62YY
 - id: datastore.filesystem
   kind: datastore
@@ -2008,22 +2021,23 @@ nodes:
   name: Manifold WASM Module
   x:
     native:
-      language: TypeScript (stub — WASM not installed)
-      api: N-API
+      language: TypeScript
+      api: WASM
       reason: Manifold geometry kernel provides robust, fast CSG boolean operations. Compiled to WebAssembly for cross-platform
-        compatibility without native compilation. The upstream C++ library (compiled to WASM) would be 10-100x faster than
-        pure JavaScript for boolean operations on complex meshes.
+        compatibility without native compilation.
     perf:
       critical: true
       optimizations: WASM SIMD instructions, pre-allocated memory pools, batch operation API
     impl:
       language: TypeScript
       complexity: complex
-      status: stub
+      status: implemented
     docs:
-      description: 'Manifold geometry library compiled to WebAssembly. Provides CSG boolean operations (union, subtract, intersect)
-        on triangle meshes. Input: indexed triangle mesh (positions + indices). Output: result triangle mesh. Used by solid
-        tools and push/pull-into-solid operations. Loaded in the mesh processing worker for off-thread execution.'
+      description: "ManifoldBridge wraps the manifold-3d npm package (WASM). Provides CSG boolean\n          operations (union,\
+        \ subtract, intersect) on triangle meshes. Dynamic import with\n          webpackIgnore to avoid bundling node:module\
+        \ dependency. Shared singleton via\n          getSharedManifoldBridge(). Converts between DraftDown half-edge mesh\
+        \ and Manifold's\n          indexed triangle format (vertProperties + triVerts). Used by SolidToolsTool,\n          BooleanUnion,\
+        \ BooleanSubtract, BooleanIntersect, and MeshWorker."
     references: https://github.com/elalish/manifold
   uuid: elHCHV0r
 - id: lib.electron
@@ -2101,7 +2115,7 @@ nodes:
       complexity: complex
       status: stub
     docs:
-      description: Plugin architecture for extending SketchCraft. Plugins are JavaScript/TypeScript modules loaded from a
+      description: Plugin architecture for extending DraftDown. Plugins are JavaScript/TypeScript modules loaded from a
         plugins directory.
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext } from '../types/tool';\nimport { Operation,\
         \ OperationParams, OperationResult } from '../types/operation';\nimport { ISceneManager, Entity } from '../data/scene';\n\
@@ -2190,11 +2204,11 @@ nodes:
     impl:
       language: TypeScript
       complexity: complex
-      status: basic
+      status: implemented
     docs:
-      description: Round (fillet) selected edges with a specified radius. Creates smooth curved faces replacing sharp edges.
-        Handles chains of connected edges, variable radius along edge length, and tangent continuity at corners. Uses arc
-        approximation with configurable segment count.
+      description: "Fillet edges with radius validation and adaptive segmentation. Self-intersection\n          detection prevents\
+        \ invalid geometry. Arc approximation with configurable segment count.\n          Handles chains of connected edges\
+        \ and corner transitions."
   uuid: iFq9wtMg
 - id: op.chamfer
   kind: operation
@@ -2208,11 +2222,10 @@ nodes:
     impl:
       language: TypeScript
       complexity: moderate
-      status: basic
+      status: implemented
     docs:
-      description: Bevel (chamfer) selected edges by cutting a flat face at a specified distance from the edge. Simpler than
-        fillet — creates flat angled faces instead of curves. Supports equal distance or asymmetric distances from each adjacent
-        face.
+      description: "Chamfer edges with edge validation, distance limits, proper normal computation,\n          and corner handling.\
+        \ Creates flat angled faces. Supports equal or asymmetric\n          distances from each adjacent face."
   uuid: I3zSZZ7x
 - id: native.opencascade
   kind: native_module
@@ -2234,7 +2247,7 @@ nodes:
       status: stub
     docs:
       description: OpenCascade Technology compiled to WebAssembly. Used specifically for STEP/IGES file import — reads B-Rep
-        solid data and tessellates to triangle mesh for import into SketchCraft's half-edge mesh format. Loaded on-demand
+        solid data and tessellates to triangle mesh for import into DraftDown's half-edge mesh format. Loaded on-demand
         (not at startup) only when STEP import is requested. Runs in the file I/O worker.
   uuid: KkGIzTXU
 - id: lib.opencascade_wasm
@@ -2265,11 +2278,12 @@ nodes:
     impl:
       language: TypeScript
       complexity: complex
-      status: stub
+      status: implemented
     docs:
-      description: 'Autodesk FBX import/export for interchange with 3ds Max, Maya, Blender, game engines. Import: reads mesh
-        geometry, materials, scene hierarchy, and basic animations. Export: writes geometry with materials and hierarchy.
-        Uses fbx-parser library for binary FBX decoding.'
+      description: "Full binary FBX 7500 import/export. Import: parses FBX binary header, node records,\n          all property\
+        \ types (S/I/D/L/F/Y/C/f/d/i/l/R), extracts geometry from PolygonVertexIndex\n          (negative index convention),\
+        \ reads materials with diffuse color. Export: writes complete\n          FBX binary with FBXHeaderExtension, GlobalSettings,\
+        \ Objects (Geometry + Model + Material),\n          Connections, and proper null records. No external parser dependency."
   uuid: ibYTuKUH
 - id: data.materials
   kind: scene_manager

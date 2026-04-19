@@ -1,5 +1,5 @@
 // @archigraph plugin.system
-// Plugin system for SketchCraft — registration, lifecycle, sandboxing
+// Plugin system for DraftDown — registration, lifecycle, sandboxing
 
 // ─── Plugin Interface ───────────────────────────────────────────
 

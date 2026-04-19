@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A modal preferences dialog window that allows 3D designers to configure application-wide settings for SketchCraft. This is an Electron renderer process window displayed as a non-resizable, modal dialog with dimensions 600x500 pixels.
+A modal preferences dialog window that allows 3D designers to configure application-wide settings for DraftDown. This is an Electron renderer process window displayed as a non-resizable, modal dialog with dimensions 600x500 pixels.
 
 ## Responsibilities
 

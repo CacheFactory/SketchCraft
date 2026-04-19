@@ -1,5 +1,5 @@
 // @archigraph curve.polyline
-// Polyline curve implementation for SketchCraft
+// Polyline curve implementation for DraftDown
 // Stores an ordered sequence of Vec3 points, supporting open and closed polylines.
 
 import { Vec3, BoundingBox } from '../../src/core/types';

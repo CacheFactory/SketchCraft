@@ -1,5 +1,5 @@
 // @archigraph process.main
-// Electron main process entry point for SketchCraft
+// Electron main process entry point for DraftDown
 
 import {
   app,
@@ -169,7 +169,7 @@ function registerIpcHandlers(): void {
       properties: ['openFile'],
       filters: [
         { name: 'SketchUp Files', extensions: ['skp'] },
-        { name: 'SketchCraft Files', extensions: ['skc'] },
+        { name: 'DraftDown Files', extensions: ['skc'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -195,7 +195,7 @@ function registerIpcHandlers(): void {
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: args.defaultName,
       filters: [
-        { name: 'SketchCraft Files', extensions: ['skc'] },
+        { name: 'DraftDown Files', extensions: ['skc'] },
       ],
     });
     if (result.canceled || !result.filePath) return null;
@@ -630,7 +630,7 @@ function rebuildMenu(): void {
       role: 'help',
       submenu: [
         {
-          label: 'About SketchCraft',
+          label: 'About DraftDown',
           click: () => sendMenuAction('about'),
         },
       ],
@@ -651,7 +651,7 @@ function createMainWindow(): BrowserWindow {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'SketchCraft',
+    title: 'DraftDown',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

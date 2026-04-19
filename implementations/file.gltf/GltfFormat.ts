@@ -1,5 +1,5 @@
 // @archigraph file.gltf-format
-// glTF 2.0 (.glb) import/export for SketchCraft
+// glTF 2.0 (.glb) import/export for DraftDown
 
 import { Vec3, MaterialDef } from '../../src/core/types';
 import { IMesh } from '../../src/core/interfaces';
@@ -155,7 +155,7 @@ export function exportGlb(
   const gltf = {
     asset: {
       version: '2.0',
-      generator: 'SketchCraft',
+      generator: 'DraftDown',
     },
     scene: 0,
     scenes: [{ name: 'Scene', nodes: [0] }],

@@ -1,5 +1,5 @@
 // @archigraph op.sweep
-// Follow-me / sweep operation for SketchCraft
+// Follow-me / sweep operation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IVertex } from '../../src/core/interfaces';

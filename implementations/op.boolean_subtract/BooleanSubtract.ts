@@ -1,5 +1,5 @@
 // @archigraph op.boolean.subtract
-// CSG Subtraction operation for SketchCraft — delegates to Manifold WASM
+// CSG Subtraction operation for DraftDown — delegates to Manifold WASM
 
 import { IGeometryEngine } from '../../src/core/interfaces';
 import {

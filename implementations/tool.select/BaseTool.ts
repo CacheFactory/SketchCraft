@@ -1,5 +1,5 @@
 // @archigraph tool.base
-// Abstract base class for all SketchCraft tools
+// Abstract base class for all DraftDown tools
 
 import { Vec3, Plane } from '../../src/core/types';
 import type { ToolCategory, ToolPhase } from '../../src/core/types';

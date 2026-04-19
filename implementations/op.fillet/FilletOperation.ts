@@ -1,5 +1,5 @@
 // @archigraph op.fillet
-// Edge filleting operation for SketchCraft
+// Edge filleting operation for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IGeometryEngine, IFace, IEdge, IVertex } from '../../src/core/interfaces';

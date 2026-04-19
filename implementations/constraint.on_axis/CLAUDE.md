@@ -7,7 +7,7 @@
 
 ## Purpose
 
-The On-Axis Constraint is the most fundamental inference constraint in SketchCraft, providing the signature "SketchUp feel" of guided drawing. It snaps cursor movement and geometry creation to align with the principal Red (X), Green (Y), or Blue (Z) axes of the global coordinate system. When active, it displays a colored inference line matching the axis being snapped to, giving immediate visual feedback that the user is drawing parallel to a major axis.
+The On-Axis Constraint is the most fundamental inference constraint in DraftDown, providing the signature "SketchUp feel" of guided drawing. It snaps cursor movement and geometry creation to align with the principal Red (X), Green (Y), or Blue (Z) axes of the global coordinate system. When active, it displays a colored inference line matching the axis being snapped to, giving immediate visual feedback that the user is drawing parallel to a major axis.
 
 This constraint must be available during interactive drawing and transformation operations. It does not update parametrically after geometry is created — it applies only during the active operation.
 

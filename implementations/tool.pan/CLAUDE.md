@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-The Pan Tool (`tool.pan`) is a viewport manipulation tool that allows users to move the camera view across the 3D scene without changing zoom level or orbit center. It is part of the view category of tools in SketchCraft's interaction layer.
+The Pan Tool (`tool.pan`) is a viewport manipulation tool that allows users to move the camera view across the 3D scene without changing zoom level or orbit center. It is part of the view category of tools in DraftDown's interaction layer.
 
 The tool provides two activation modes:
 1. Primary mode: Activated via toolbar button or keyboard shortcut "H"

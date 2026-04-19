@@ -2,7 +2,7 @@
 
 ## What This Component Is
 
-This is a WebAssembly-compiled bridge to OpenCascade Technology (OCCT), specifically providing STEP and IGES file import capabilities for SketchCraft. It is a native C++ module that exposes a minimal API surface focused exclusively on importing mechanical CAD data from STEP/IGES formats and converting it to tessellated triangle meshes suitable for SketchCraft's half-edge mesh format.
+This is a WebAssembly-compiled bridge to OpenCascade Technology (OCCT), specifically providing STEP and IGES file import capabilities for DraftDown. It is a native C++ module that exposes a minimal API surface focused exclusively on importing mechanical CAD data from STEP/IGES formats and converting it to tessellated triangle meshes suitable for DraftDown's half-edge mesh format.
 
 This module runs in the Electron main process within a dedicated file I/O worker. It is **not** loaded at application startup — it must be loaded on-demand only when a user initiates a STEP or IGES import operation.
 
@@ -11,7 +11,7 @@ This module runs in the Electron main process within a dedicated file I/O worker
 - Parse STEP (ISO 10303-21) and IGES (Initial Graphics Exchange Specification) files
 - Extract B-Rep (Boundary Representation) solid geometry from the parsed CAD files
 - Tessellate B-Rep surfaces into triangle meshes with configurable tolerance
-- Convert tessellated mesh data into a format compatible with SketchCraft's half-edge mesh representation
+- Convert tessellated mesh data into a format compatible with DraftDown's half-edge mesh representation
 - Provide error handling for malformed or unsupported CAD files
 - Report import progress for long-running operations
 
@@ -47,9 +47,9 @@ The module must expose a synchronous or asynchronous API callable from the Elect
 
 ## Data Produced
 
-- **Triangle Mesh Data**: Must be compatible with SketchCraft's half-edge mesh format
+- **Triangle Mesh Data**: Must be compatible with DraftDown's half-edge mesh format
   - Vertices must be deduplicated
-  - Normals may be computed or omitted (SketchCraft can compute them)
+  - Normals may be computed or omitted (DraftDown can compute them)
   - Face-vertex relationships must be manifold (no T-junctions, consistent winding)
 - **Import Metadata**: CAD file properties that may be useful for import dialog or logging
 
@@ -92,7 +92,7 @@ This module must implement:
 3. **Tessellation Engine**: Wraps OCCT's `BRepMesh_IncrementalMesh` for converting B-Rep to mesh
 4. **Mesh Extractor**: Walks OCCT topology structures (`TopoDS_Face`, `TopoDS_Edge`) and extracts tessellated triangles
 5. **Data Marshaller**: Converts OCCT's internal mesh representation to flat arrays suitable for JavaScript consumption
-6. **Error Handler**: Maps OCCT exceptions and error codes to SketchCraft-friendly error messages
+6. **Error Handler**: Maps OCCT exceptions and error codes to DraftDown-friendly error messages
 
 ## Performance Constraints
 
@@ -122,4 +122,4 @@ The implementer must decide:
 
 ## Existing Code References
 
-None specified. This is a new module to be created for SketchCraft.
+None specified. This is a new module to be created for DraftDown.

@@ -6,7 +6,7 @@
 
 ## Purpose
 
-This test suite detects visual regressions in SketchCraft's 3D rendering pipeline by capturing screenshots of predefined scenes and comparing them pixel-by-pixel against golden reference images. Any deviation beyond a configurable threshold indicates a regression in the renderer, shaders, or post-processing effects.
+This test suite detects visual regressions in DraftDown's 3D rendering pipeline by capturing screenshots of predefined scenes and comparing them pixel-by-pixel against golden reference images. Any deviation beyond a configurable threshold indicates a regression in the renderer, shaders, or post-processing effects.
 
 ## Responsibilities
 

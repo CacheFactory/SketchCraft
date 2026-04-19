@@ -1,5 +1,5 @@
 // @archigraph file.native-format
-// Native .sketch binary format for SketchCraft
+// Native .sketch binary format for DraftDown
 
 import { Vec3, Color, Transform, Quaternion, LengthUnit, MaterialDef } from '../../src/core/types';
 import {

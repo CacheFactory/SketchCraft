@@ -1,5 +1,5 @@
 // @archigraph file.dxf-format
-// AutoCAD DXF import/export for SketchCraft
+// AutoCAD DXF import/export for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IMesh } from '../../src/core/interfaces';

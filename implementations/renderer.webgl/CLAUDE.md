@@ -7,7 +7,7 @@
 
 ## What This Component Is
 
-The WebGL Renderer is the core rendering engine for SketchCraft's 3D viewport. It manages the complete render loop, scene graph synchronization, and visual presentation of all 3D geometry. Built on Three.js, it translates the application's scene graph into optimized GPU draw calls and applies post-processing effects to achieve a polished CAD visualization.
+The WebGL Renderer is the core rendering engine for DraftDown's 3D viewport. It manages the complete render loop, scene graph synchronization, and visual presentation of all 3D geometry. Built on Three.js, it translates the application's scene graph into optimized GPU draw calls and applies post-processing effects to achieve a polished CAD visualization.
 
 This component is **performance-critical** and must maintain 60fps for models up to 500K faces and 30fps for models up to 2M faces.
 

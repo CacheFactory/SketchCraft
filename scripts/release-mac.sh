@@ -8,7 +8,7 @@
 # Requirements:
 #   - Apple Developer ID Application cert in Keychain
 #   - Notarization credentials stored in Keychain via:
-#       xcrun notarytool store-credentials "sketchcraft-notary" \
+#       xcrun notarytool store-credentials "draftdown-notary" \
 #         --apple-id "<email>" --team-id "6W2A7VS4U3"
 #   - AWS CLI configured with write access to s3://archigraph-releases-prod
 #
@@ -16,9 +16,9 @@ set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────────
 S3_BUCKET="archigraph-releases-prod"
-S3_PREFIX="sketchcraft"
-DMG_INTEL="SketchCraft-1.0.0.dmg"
-DMG_ARM64="SketchCraft-1.0.0-arm64.dmg"
+S3_PREFIX="draftdown"
+DMG_INTEL="DraftDown-1.0.0.dmg"
+DMG_ARM64="DraftDown-1.0.0-arm64.dmg"
 KEYCHAIN_PROFILE="sketchcraft-notary"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
@@ -58,8 +58,8 @@ ARM64_PATH="$ROOT/release/$DMG_ARM64"
 [ -f "$ARM64_PATH" ] || die "Missing build output: $ARM64_PATH"
 
 say "Verifying signatures"
-codesign --verify --deep --strict --verbose=2 "$ROOT/release/mac/SketchCraft.app" 2>&1 | tail -2
-codesign --verify --deep --strict --verbose=2 "$ROOT/release/mac-arm64/SketchCraft.app" 2>&1 | tail -2
+codesign --verify --deep --strict --verbose=2 "$ROOT/release/mac/DraftDown.app" 2>&1 | tail -2
+codesign --verify --deep --strict --verbose=2 "$ROOT/release/mac-arm64/DraftDown.app" 2>&1 | tail -2
 
 # ─── Upload ──────────────────────────────────────────────────────────────
 say "Uploading to s3://$S3_BUCKET/$S3_PREFIX/"

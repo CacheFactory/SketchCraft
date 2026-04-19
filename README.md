@@ -1,4 +1,4 @@
-# SketchCraft
+# DraftDown
 
 A free, open-source 3D modeling application inspired by SketchUp, built with Electron + React + Three.js. Draw 2D shapes, push/pull them into 3D solids, and build architectural models with an intuitive click-based workflow.
 
@@ -12,12 +12,16 @@ https://github.com/user-attachments/assets/daa8530d-d3b9-4830-90af-bb2e815e5ce2
 
 **macOS** (signed and notarized):
 
-- **[Apple Silicon (M1/M2/M3/M4)](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/sketchcraft/SketchCraft-1.0.0-arm64.dmg)** — 96 MB
-- **[Intel Mac](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/sketchcraft/SketchCraft-1.0.0.dmg)** — 102 MB
+- **[Apple Silicon (M1/M2/M3/M4)](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/draftdown/DraftDown-1.0.0-arm64.dmg)** — 96 MB
+- **[Intel Mac](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/draftdown/DraftDown-1.0.0.dmg)** — 102 MB
 
 **Windows**:
 
-- **[Windows x64 Installer](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/sketchcraft/SketchCraft%20Setup%201.0.0.exe)** — 92 MB
+- **[Windows x64 Installer](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/draftdown/DraftDown%20Setup%201.0.0.exe)** — 92 MB
+
+**Linux**:
+
+- **[Linux x64 AppImage](https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/draftdown/DraftDown-1.0.0.AppImage)** — 128 MB
 
 ## Features
 
@@ -81,9 +85,9 @@ npx playwright test
 
 ## Architecture
 
-SketchCraft uses an **ArchiGraph** — a machine-readable architecture graph (126 nodes, 559 edges) that maps every component, service, and relationship in the system.
+DraftDown uses an **ArchiGraph** — a machine-readable architecture graph (126 nodes, 559 edges) that maps every component, service, and relationship in the system.
 
-### [View the interactive architecture diagram →](https://archigraph.ai/viewer?archigraph=https://raw.githubusercontent.com/CacheFactory/SketchCraft/main/archigraph.yaml&schema=https://raw.githubusercontent.com/CacheFactory/SketchCraft/main/schema.yaml)
+### [View the interactive architecture diagram →](https://archigraph.ai/viewer?archigraph=https://raw.githubusercontent.com/CacheFactory/DraftDown/main/archigraph.yaml&schema=https://raw.githubusercontent.com/CacheFactory/DraftDown/main/schema.yaml)
 
 The ArchiGraph is the fastest way for new contributors (human or AI) to understand the codebase. Each node has a `docs.description` explaining what it does and an `impl.status` showing its current state:
 

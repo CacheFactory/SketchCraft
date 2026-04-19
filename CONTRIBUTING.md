@@ -1,4 +1,4 @@
-# Contributing to SketchCraft
+# Contributing to DraftDown
 
 ## The ArchiGraph: Your Map of the Codebase
 

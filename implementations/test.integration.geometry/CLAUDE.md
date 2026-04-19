@@ -2,7 +2,7 @@
 
 ## Overview
 
-This test suite validates the geometry engine and all modeling operations for SketchCraft. It runs headless (without Electron) using Vitest and exercises the entire geometry stack from low-level half-edge mesh operations through high-level boolean operations. Tests must verify topological consistency, manifold properties, and volumetric correctness of all operations.
+This test suite validates the geometry engine and all modeling operations for DraftDown. It runs headless (without Electron) using Vitest and exercises the entire geometry stack from low-level half-edge mesh operations through high-level boolean operations. Tests must verify topological consistency, manifold properties, and volumetric correctness of all operations.
 
 ## Test Framework
 

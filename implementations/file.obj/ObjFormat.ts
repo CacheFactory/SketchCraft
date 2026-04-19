@@ -1,5 +1,5 @@
 // @archigraph file.obj-format
-// Wavefront .obj import/export for SketchCraft
+// Wavefront .obj import/export for DraftDown
 
 import { Vec3 } from '../../src/core/types';
 import { IVertex, IFace, IMesh } from '../../src/core/interfaces';
@@ -60,7 +60,7 @@ export function exportObj(
   } = options;
 
   const lines: string[] = [];
-  lines.push('# Exported from SketchCraft');
+  lines.push('# Exported from DraftDown');
   lines.push(`# Vertices: ${mesh.vertices.size}, Faces: ${mesh.faces.size}`);
   lines.push('');
 
@@ -132,7 +132,7 @@ export function exportObj(
 
 export function exportMtl(materials: ObjMaterial[]): string {
   const lines: string[] = [];
-  lines.push('# Material Library exported from SketchCraft');
+  lines.push('# Material Library exported from DraftDown');
   lines.push('');
 
   for (const mat of materials) {
