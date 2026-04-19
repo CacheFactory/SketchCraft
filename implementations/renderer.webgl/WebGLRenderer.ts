@@ -61,6 +61,30 @@ export class WebGLRenderer implements IRenderer {
   // Raycaster
   private _raycaster: THREE.Raycaster;
 
+  // GPU picking
+  private _pickRenderTarget: THREE.WebGLRenderTarget | null = null;
+  private _pickScene: THREE.Scene;
+  private _pickOverlayScene: THREE.Scene;
+  private _pickMaterials = new Map<string, THREE.MeshBasicMaterial>();
+  private _pickLineMaterials = new Map<string, THREE.LineBasicMaterial>(); // track line materials for disposal
+  private _pickIdToEntity = new Map<number, string>(); // encoded color -> entityId
+  private _pickEntityToId = new Map<string, number>(); // entityId -> encoded color
+  private _nextPickId = 1;
+  private _pickPixelBuffer = new Uint8Array(4);
+  private _gpuPickLogCounter = 0;
+  private _pickSceneDirty = true;  // rebuild pick scene objects (entity added/removed)
+  private _pickBufferDirty = true; // re-render pick buffer (camera moved)
+  // Batched pick mesh (vertex-color encoded face IDs)
+  private _batchedPickMesh: THREE.Mesh | null = null;
+  private _batchedPickIdToFace: Map<number, string> = new Map();
+  private _batchedFaceHighlightFn: ((faceId: string) => THREE.BufferGeometry | null) | null = null;
+  // Temporary highlight meshes for batched faces
+  private _batchedHighlights = new Map<string, THREE.Mesh>();
+  // Camera movement detection — numeric comparison avoids string allocation per frame
+  private _lastCamX = NaN;
+  private _lastCamY = NaN;
+  private _lastCamZ = NaN;
+
   // Stats
   private _stats: IRenderStats = { fps: 0, frameTime: 0, drawCalls: 0, triangles: 0 };
   private _lastFrameTime = 0;
@@ -93,6 +117,15 @@ export class WebGLRenderer implements IRenderer {
     this._raycaster = new THREE.Raycaster();
     this._raycaster.params.Line = { threshold: 0.1 };
     this._raycaster.params.Points = { threshold: 0.1 };
+
+    this._pickScene = new THREE.Scene();
+    this._pickScene.background = new THREE.Color(0x000000); // black = no entity
+    this._pickOverlayScene = new THREE.Scene();
+  }
+
+  /** Whether picking is available (per-entity objects or batched pick mesh). */
+  hasEntityObjects(): boolean {
+    return this._entityObjects.size > 0 || this._batchedPickMesh !== null;
   }
 
   /** Returns the main Three.js scene for external manipulation. */
@@ -109,11 +142,30 @@ export class WebGLRenderer implements IRenderer {
   registerEntityObject(entityId: string, object: THREE.Object3D): void {
     object.userData.entityId = entityId;
     this._entityObjects.set(entityId, object);
+    this._pickSceneDirty = true;
+    this._pickBufferDirty = true;
   }
 
   /** Unregister an entity's Three.js object. */
   unregisterEntityObject(entityId: string): void {
     this._entityObjects.delete(entityId);
+    this._pickSceneDirty = true;
+    this._pickBufferDirty = true;
+  }
+
+  /** Register a function to create highlight geometry for a batched face. */
+  setBatchedFaceHighlightFn(fn: (faceId: string) => THREE.BufferGeometry | null): void {
+    this._batchedFaceHighlightFn = fn;
+  }
+
+  /** Register a batched pick mesh with vertex-color-encoded face IDs for GPU picking. */
+  setBatchedPickMesh(mesh: THREE.Mesh, pickIdToFace: Map<number, string>): void {
+    this._batchedPickMesh = mesh;
+    this._batchedPickIdToFace = pickIdToFace;
+    // Ensure per-entity pick IDs don't collide with batched pick IDs
+    this._nextPickId = Math.max(this._nextPickId, pickIdToFace.size + 1);
+    this._pickSceneDirty = true;
+    this._pickBufferDirty = true;
   }
 
   initialize(canvas: HTMLCanvasElement, width: number, height: number): void {
@@ -141,11 +193,25 @@ export class WebGLRenderer implements IRenderer {
     this._setupGrid();
     this._setupAxes();
 
+    // GPU picking render target (1:1 pixel ratio for accurate reads)
+    this._pickRenderTarget = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+    });
+
     this._cameraController.updateAspect(width / height);
   }
 
   dispose(): void {
     this.stopRenderLoop();
+    this._clearBatchedHighlights();
+    if (this._batchedPickMesh) {
+      this._batchedPickMesh.geometry.dispose();
+      (this._batchedPickMesh.material as THREE.Material).dispose();
+      this._batchedPickMesh = null;
+    }
     this._guideLines.forEach((line) => {
       line.geometry.dispose();
       (line.material as THREE.Material).dispose();
@@ -153,30 +219,265 @@ export class WebGLRenderer implements IRenderer {
     this._guideLines.clear();
     this._selectionMaterial.dispose();
     this._preSelectionMaterial.dispose();
+    this._pickRenderTarget?.dispose();
+    this._pickMaterials.forEach(m => m.dispose());
+    this._pickMaterials.clear();
+    this._pickLineMaterials.forEach(m => m.dispose());
+    this._pickLineMaterials.clear();
+    // Dispose glow tube pool
+    this._glowTubeGeo?.dispose();
+    this._glowSelMat.dispose();
+    this._glowPreSelMat.dispose();
+    this._glowTubePool.length = 0;
     this._renderer.dispose();
+  }
+
+  // ── GPU Picking ─────────────────────────────────────────────────
+
+  /** Mark the pick buffer as needing re-render (call after scene changes). */
+  invalidatePick(): void {
+    this._pickSceneDirty = true;
+    this._pickBufferDirty = true;
+  }
+
+  /** Encode an entity ID as a unique color for GPU picking. */
+  private getPickId(entityId: string): number {
+    let id = this._pickEntityToId.get(entityId);
+    if (id !== undefined) return id;
+    id = this._nextPickId++;
+    this._pickEntityToId.set(entityId, id);
+    this._pickIdToEntity.set(id, entityId);
+    return id;
+  }
+
+  /** Convert a pick ID to raw RGB floats (0-1 range, no color space conversion). */
+  private pickIdToRGB(id: number): [number, number, number] {
+    return [
+      ((id >> 16) & 0xff) / 255,
+      ((id >> 8) & 0xff) / 255,
+      (id & 0xff) / 255,
+    ];
+  }
+
+  /** Vertex shader shared by all pick materials. */
+  private static readonly PICK_VERT = `
+    void main() {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  /** Fragment shader shared by all pick materials. */
+  private static readonly PICK_FRAG = `
+    uniform vec3 pickColor;
+    void main() {
+      gl_FragColor = vec4(pickColor, 1.0);
+    }
+  `;
+
+  /** Rebuild the pick scene by cloning geometry with pick-color materials. */
+  private rebuildPickScene(): void {
+    const t0 = performance.now();
+    console.log(`[rebuildPickScene] starting, ${this._entityObjects.size} entities`);
+    // Dispose previous pick scene objects (geometry is shared, don't dispose it; but remove references)
+    for (const child of [...this._pickScene.children]) {
+      this._pickScene.remove(child);
+    }
+    for (const child of [...this._pickOverlayScene.children]) {
+      this._pickOverlayScene.remove(child);
+    }
+    // Dispose old pick materials (ShaderMaterials are created fresh each rebuild)
+    this._pickMaterials.forEach(m => m.dispose());
+    this._pickMaterials.clear();
+    this._pickLineMaterials.forEach(m => m.dispose());
+    this._pickLineMaterials.clear();
+
+    // Clone main scene objects with raw ShaderMaterial pick colors (bypasses color management)
+    this._entityObjects.forEach((obj, entityId) => {
+      const pickId = this.getPickId(entityId);
+      const [r, g, b] = this.pickIdToRGB(pickId);
+
+      // Create ShaderMaterial with raw pick color uniform
+      const pickMat = new THREE.ShaderMaterial({
+        uniforms: { pickColor: { value: new THREE.Vector3(r, g, b) } },
+        vertexShader: WebGLRenderer.PICK_VERT,
+        fragmentShader: WebGLRenderer.PICK_FRAG,
+        side: THREE.DoubleSide,
+      });
+
+      if (obj instanceof THREE.Mesh) {
+        const pickMesh = new THREE.Mesh(obj.geometry, pickMat);
+        pickMesh.matrixAutoUpdate = false;
+        pickMesh.matrix.copy(obj.matrixWorld);
+        pickMesh.visible = obj.visible;
+        this._pickScene.add(pickMesh);
+      } else if (obj instanceof THREE.Line) {
+        const pickLine = new THREE.Line(obj.geometry, pickMat);
+        pickLine.matrixAutoUpdate = false;
+        pickLine.matrix.copy(obj.matrixWorld);
+        pickLine.visible = obj.visible;
+        this._pickOverlayScene.add(pickLine);
+      }
+
+      // Handle groups (face groups contain a mesh child)
+      if (obj.parent && obj.parent.userData.entityId === entityId) {
+        // Already handled the mesh directly
+      } else if (obj instanceof THREE.Group) {
+        obj.traverse(child => {
+          if (child instanceof THREE.Mesh && child !== (obj as any)) {
+            const pickMesh = new THREE.Mesh(child.geometry, pickMat);
+            pickMesh.matrixAutoUpdate = false;
+            pickMesh.matrix.copy(child.matrixWorld);
+            pickMesh.visible = child.visible;
+            this._pickScene.add(pickMesh);
+          }
+        });
+      }
+    });
+
+    // Add batched pick mesh if available (vertex colors encode face IDs)
+    if (this._batchedPickMesh) {
+      this._pickScene.add(this._batchedPickMesh);
+    }
+
+    console.log(`[rebuildPickScene] done in ${(performance.now() - t0).toFixed(1)}ms, pick scene: ${this._pickScene.children.length}, pick overlay: ${this._pickOverlayScene.children.length}, batched: ${this._batchedPickMesh ? 'yes' : 'no'}`);
+  }
+
+  /** Render the pick buffer and read the pixel at (screenX, screenY).
+   *  Returns the entity ID under the cursor, or null. */
+  gpuPick(screenX: number, screenY: number): string | null {
+    if (!this._pickRenderTarget || !this._renderer) return null;
+
+    const camera = this._cameraController.getThreeCamera();
+    camera.updateMatrixWorld(true);
+
+    // Rebuild pick scene objects only when entities are added/removed
+    if (this._pickSceneDirty) {
+      this.rebuildPickScene();
+      this._pickSceneDirty = false;
+      this._pickBufferDirty = true; // must re-render after rebuild
+    }
+
+    // Re-render pick buffer when camera moved or scene rebuilt
+    if (this._pickBufferDirty) {
+      const currentRT = this._renderer.getRenderTarget();
+      const currentToneMapping = this._renderer.toneMapping;
+      const currentOutputColorSpace = this._renderer.outputColorSpace;
+
+      this._renderer.toneMapping = THREE.NoToneMapping;
+      this._renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+
+      this._renderer.setRenderTarget(this._pickRenderTarget);
+      this._renderer.clear(true, true, true);
+      this._renderer.render(this._pickScene, camera);
+      this._renderer.clearDepth();
+      this._renderer.render(this._pickOverlayScene, camera);
+
+      this._renderer.setRenderTarget(currentRT);
+      this._renderer.toneMapping = currentToneMapping;
+      this._renderer.outputColorSpace = currentOutputColorSpace;
+
+      this._pickBufferDirty = false;
+    }
+
+    // Read single pixel under cursor
+    // Note: WebGL Y is flipped relative to screen Y
+    // Pick render target is CSS-sized (width × height), NOT scaled by pixelRatio,
+    // so use CSS coordinates directly for readRenderTargetPixels.
+    const x = Math.floor(screenX);
+    const y = Math.floor(this._height - screenY);
+
+    this._renderer.readRenderTargetPixels(
+      this._pickRenderTarget, x, y, 1, 1, this._pickPixelBuffer,
+    );
+
+    const [r, g, b, a] = this._pickPixelBuffer;
+    const pickId = (r << 16) | (g << 8) | b;
+
+    // Debug: log every 60th call to avoid spam
+    if (!this._gpuPickLogCounter) this._gpuPickLogCounter = 0;
+    this._gpuPickLogCounter++;
+    if (this._gpuPickLogCounter % 60 === 1) {
+      console.log(`[gpuPick] pixel at (${screenX},${screenY}): r=${r} g=${g} b=${b} a=${a} -> pickId=${pickId}, pickScene children=${this._pickScene.children.length}, dirty=${this._pickSceneDirty}/${this._pickBufferDirty}, entities=${this._entityObjects.size}, batchedMap=${this._batchedPickIdToFace.size}`);
+    }
+
+    if (pickId === 0) return null; // Background (no entity)
+
+    // Check batched face pick IDs first, then per-entity pick IDs
+    const batchedFace = this._batchedPickIdToFace.get(pickId);
+    if (batchedFace) {
+      console.log(`[gpuPick] batched hit: pickId=${pickId} -> ${batchedFace}`);
+      return batchedFace;
+    }
+
+    const entityHit = this._pickIdToEntity.get(pickId) || null;
+    if (entityHit) {
+      console.log(`[gpuPick] entity hit: pickId=${pickId} -> ${entityHit}`);
+    }
+    return entityHit;
   }
 
   resize(width: number, height: number): void {
     this._width = width;
     this._height = height;
     this._renderer.setSize(width, height);
+    this._pickRenderTarget?.setSize(width, height);
+    this._pickBufferDirty = true;
     this._cameraController.updateAspect(width / height);
   }
+
+  // Performance logging — throttled to once per second
+  private _lastPerfLog = 0;
+  private _perfFrameCount = 0;
+  private _perfMainTotal = 0;
+  private _perfOverlayTotal = 0;
+  private _perfUpdateTotal = 0;
 
   render(): void {
     const startTime = performance.now();
 
+    const t0 = performance.now();
     this._cameraController.update();
     const camera = this._cameraController.getThreeCamera();
+    const tUpdate = performance.now() - t0;
+
+    // Only mark pick buffer dirty when camera actually moves (numeric compare, no allocation)
+    const pos = camera.position;
+    if (pos.x !== this._lastCamX || pos.y !== this._lastCamY || pos.z !== this._lastCamZ) {
+      this._lastCamX = pos.x;
+      this._lastCamY = pos.y;
+      this._lastCamZ = pos.z;
+      this._pickBufferDirty = true;
+    }
 
     this._renderer.clear(true, true, true);
 
     // Render main scene
+    const t1 = performance.now();
     this._renderer.render(this._scene, camera);
+    const tMain = performance.now() - t1;
 
     // Render overlay scene on top (no depth clear)
     this._renderer.clearDepth();
+    const t2 = performance.now();
     this._renderer.render(this._overlayScene, camera);
+    const tOverlay = performance.now() - t2;
+
+    // Accumulate and log once per second
+    this._perfFrameCount++;
+    this._perfMainTotal += tMain;
+    this._perfOverlayTotal += tOverlay;
+    this._perfUpdateTotal += tUpdate;
+    if (startTime - this._lastPerfLog >= 1000) {
+      const n = this._perfFrameCount;
+      const info = this._renderer.info;
+      console.log(
+        `[Render] ${n} frames/s | main: ${(this._perfMainTotal / n).toFixed(1)}ms | overlay: ${(this._perfOverlayTotal / n).toFixed(1)}ms | update: ${(this._perfUpdateTotal / n).toFixed(1)}ms | drawCalls: ${info.render.calls} | tris: ${info.render.triangles} | scene children: ${this._scene.children.length} | overlay children: ${this._overlayScene.children.length}`
+      );
+      this._perfFrameCount = 0;
+      this._perfMainTotal = 0;
+      this._perfOverlayTotal = 0;
+      this._perfUpdateTotal = 0;
+      this._lastPerfLog = startTime;
+    }
 
     // Stats tracking
     const frameTime = performance.now() - startTime;
@@ -232,8 +533,11 @@ export class WebGLRenderer implements IRenderer {
     return this._renderMode;
   }
 
+  // Reusable NDC vector for pick() — avoids allocation per call
+  private _pickNdc = new THREE.Vector2();
+
   pick(screenX: number, screenY: number): { entityId: string; point: Vec3 } | null {
-    const ndc = new THREE.Vector2(
+    const ndc = this._pickNdc.set(
       (screenX / this._width) * 2 - 1,
       -(screenY / this._height) * 2 + 1,
     );
@@ -260,18 +564,24 @@ export class WebGLRenderer implements IRenderer {
   }
 
   getStats(): IRenderStats {
-    return { ...this._stats };
+    return this._stats;
   }
 
   setSelectionHighlight(entityIds: string[]): void {
     // Restore previously highlighted objects
     this._restoreHighlighted();
+    // Remove old batched highlights
+    this._clearBatchedHighlights();
     this._selectedEntityIds = new Set(entityIds);
 
     for (const id of entityIds) {
       const obj = this._entityObjects.get(id);
-      if (!obj) continue;
-      this._applyHighlight(obj, 'selection');
+      if (obj) {
+        this._applyHighlight(obj, 'selection');
+      } else {
+        // Try batched face highlight
+        this._addBatchedHighlight(id, 'selection');
+      }
     }
   }
 
@@ -287,6 +597,8 @@ export class WebGLRenderer implements IRenderer {
         if (prevObj && !this._selectedEntityIds.has(prevId)) {
           this._restoreObject(prevObj);
         }
+        // Remove batched highlight for deselected entities
+        this._removeBatchedHighlight(prevId);
       }
     }
 
@@ -297,6 +609,9 @@ export class WebGLRenderer implements IRenderer {
         const obj = this._entityObjects.get(id);
         if (obj) {
           this._applyHighlight(obj, 'preselection');
+        } else {
+          // Try batched face highlight
+          this._addBatchedHighlight(id, 'preselection');
         }
       }
     }
@@ -338,6 +653,36 @@ export class WebGLRenderer implements IRenderer {
   // Store original materials for restoration
   private _highlightedObjects = new Map<string, { obj: THREE.Object3D; origMaterial: THREE.Material | THREE.Material[] }>();
 
+  // Reusable vectors for highlight calculations (avoid allocation per call)
+  private _hlP1 = new THREE.Vector3();
+  private _hlP2 = new THREE.Vector3();
+  private _hlDir = new THREE.Vector3();
+  private _hlMid = new THREE.Vector3();
+
+  // Glow tube pool: reuse geometry + material instead of creating new ones each hover
+  private _glowTubePool: THREE.Mesh[] = [];
+  private _glowTubeGeo: THREE.CylinderGeometry | null = null;
+  private _glowSelMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.7, depthTest: false });
+  private _glowPreSelMat = new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.7, depthTest: false });
+
+  private _getGlowTube(): THREE.Mesh {
+    const pooled = this._glowTubePool.pop();
+    if (pooled) return pooled;
+    // Create shared geometry once (unit cylinder, will be scaled per-edge)
+    if (!this._glowTubeGeo) {
+      this._glowTubeGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1);
+      this._glowTubeGeo.rotateX(Math.PI / 2);
+    }
+    const tube = new THREE.Mesh(this._glowTubeGeo, this._glowSelMat);
+    tube.raycast = () => {}; // Non-raycastable
+    return tube;
+  }
+
+  private _returnGlowTube(tube: THREE.Mesh): void {
+    this._overlayScene.remove(tube);
+    this._glowTubePool.push(tube);
+  }
+
   private _applyHighlight(obj: THREE.Object3D, mode: 'selection' | 'preselection'): void {
     const id = obj.userData.entityId;
     if (!id) return;
@@ -360,34 +705,32 @@ export class WebGLRenderer implements IRenderer {
         });
       }
     } else if (obj instanceof THREE.Line) {
-      // Highlight edges by swapping material + adding a glow tube
+      // Highlight edges by swapping material + adding a reusable glow tube
       if (!this._highlightedObjects.has(id)) {
         this._highlightedObjects.set(id, { obj, origMaterial: obj.material as THREE.Material });
       }
       obj.material = mode === 'selection' ? this._selHighlightEdge : this._preSelHighlightEdge;
 
-      // Add a tube mesh along the edge for visible thickness
+      // Add a tube mesh along the edge for visible thickness (reuse from pool)
       const positions = (obj.geometry as THREE.BufferGeometry).getAttribute('position');
       if (positions && positions.count >= 2) {
-        const p1 = new THREE.Vector3(positions.getX(0), positions.getY(0), positions.getZ(0));
-        const p2 = new THREE.Vector3(positions.getX(1), positions.getY(1), positions.getZ(1));
-        const dir = new THREE.Vector3().subVectors(p2, p1);
-        const len = dir.length();
+        this._hlP1.set(positions.getX(0), positions.getY(0), positions.getZ(0));
+        this._hlP2.set(positions.getX(1), positions.getY(1), positions.getZ(1));
+        this._hlDir.subVectors(this._hlP2, this._hlP1);
+        const len = this._hlDir.length();
         if (len > 0.001) {
           // Scale tube radius by camera distance so highlight looks constant on screen
-          const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+          this._hlMid.addVectors(this._hlP1, this._hlP2).multiplyScalar(0.5);
           const camPos = this._cameraController.getThreeCamera().position;
-          const camDist = mid.distanceTo(camPos);
+          const camDist = this._hlMid.distanceTo(camPos);
           const tubeRadius = Math.max(camDist * 0.003, 0.005);
-          const tubeGeo = new THREE.CylinderGeometry(tubeRadius, tubeRadius, len, 6, 1);
-          tubeGeo.rotateX(Math.PI / 2);
-          const color = mode === 'selection' ? 0x00aaff : 0xff8800;
-          const tubeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false });
-          const tube = new THREE.Mesh(tubeGeo, tubeMat);
+
+          const tube = this._getGlowTube();
+          tube.material = mode === 'selection' ? this._glowSelMat : this._glowPreSelMat;
           tube.name = `edge-glow-${id}`;
-          tube.position.copy(p1).lerp(p2, 0.5);
-          tube.lookAt(p2);
-          tube.raycast = () => {}; // Non-raycastable
+          tube.position.copy(this._hlMid);
+          tube.scale.set(tubeRadius, tubeRadius, len);
+          tube.lookAt(this._hlP2);
           (obj as any).__glowTube = tube;
           this._overlayScene.add(tube);
         }
@@ -402,12 +745,9 @@ export class WebGLRenderer implements IRenderer {
     const saved = this._highlightedObjects.get(id);
     if (saved && (saved.obj instanceof THREE.Mesh || saved.obj instanceof THREE.Line)) {
       (saved.obj as any).material = saved.origMaterial;
-      // Remove glow tube if present
+      // Return glow tube to pool instead of disposing
       if ((saved.obj as any).__glowTube) {
-        const tube = (saved.obj as any).__glowTube;
-        this._overlayScene.remove(tube);
-        tube.geometry.dispose();
-        (tube.material as THREE.Material).dispose();
+        this._returnGlowTube((saved.obj as any).__glowTube);
         delete (saved.obj as any).__glowTube;
       }
       this._highlightedObjects.delete(id);
@@ -425,17 +765,47 @@ export class WebGLRenderer implements IRenderer {
     }
   }
 
+  /** Add a temporary highlight mesh for a batched face. */
+  private _addBatchedHighlight(faceId: string, mode: 'selection' | 'preselection'): void {
+    if (!this._batchedFaceHighlightFn || this._batchedHighlights.has(faceId)) return;
+    const geo = this._batchedFaceHighlightFn(faceId);
+    if (!geo) return;
+    const mat = mode === 'selection' ? this._selHighlightFace : this._preSelHighlightFace;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = `batched-highlight-${faceId}`;
+    mesh.renderOrder = 1;
+    mesh.frustumCulled = false;
+    this._scene.add(mesh);
+    this._batchedHighlights.set(faceId, mesh);
+  }
+
+  /** Remove a specific batched highlight mesh. */
+  private _removeBatchedHighlight(faceId: string): void {
+    const mesh = this._batchedHighlights.get(faceId);
+    if (mesh) {
+      this._scene.remove(mesh);
+      mesh.geometry.dispose();
+      this._batchedHighlights.delete(faceId);
+    }
+  }
+
+  /** Remove all batched highlight meshes. */
+  private _clearBatchedHighlights(): void {
+    for (const [, mesh] of this._batchedHighlights) {
+      this._scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this._batchedHighlights.clear();
+  }
+
   private _restoreHighlighted(): void {
     for (const [, { obj, origMaterial }] of this._highlightedObjects) {
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
         (obj as any).material = origMaterial;
       }
-      // Remove glow tubes
+      // Return glow tubes to pool instead of disposing
       if ((obj as any).__glowTube) {
-        const tube = (obj as any).__glowTube;
-        this._overlayScene.remove(tube);
-        tube.geometry.dispose();
-        (tube.material as THREE.Material).dispose();
+        this._returnGlowTube((obj as any).__glowTube);
         delete (obj as any).__glowTube;
       }
     }
@@ -504,6 +874,11 @@ export class WebGLRenderer implements IRenderer {
     this._axes.visible = visible;
   }
 
+  // Reusable objects for section plane (avoid allocation per call)
+  private _sectionNormal = new THREE.Vector3();
+  private _sectionPoint = new THREE.Vector3();
+  private _sectionPlane = new THREE.Plane();
+
   setSectionPlane(plane: { point: Vec3; normal: Vec3 } | null): void {
     if (!plane) {
       // Clear clipping on all scene materials
@@ -521,9 +896,9 @@ export class WebGLRenderer implements IRenderer {
     }
 
     const { point, normal } = plane;
-    const n = new THREE.Vector3(normal.x, normal.y, normal.z).normalize();
-    const constant = -n.dot(new THREE.Vector3(point.x, point.y, point.z));
-    const clipPlane = new THREE.Plane(n, constant);
+    const n = this._sectionNormal.set(normal.x, normal.y, normal.z).normalize();
+    const constant = -n.dot(this._sectionPoint.set(point.x, point.y, point.z));
+    const clipPlane = this._sectionPlane.set(n, constant);
 
     this._scene.traverse((obj) => {
       if ((obj as THREE.Mesh).material) {

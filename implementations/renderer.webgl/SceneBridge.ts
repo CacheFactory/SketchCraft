@@ -37,6 +37,21 @@ export class SceneBridge {
   private snapMarkerDot: THREE.Mesh;
   private snapActive = false;
 
+  // Dirty tracking: cache vertex position hashes to skip unchanged faces/edges
+  private lastVertexPositions = new Map<string, string>();
+
+  // Batched mode: large model imported as single merged mesh.
+  // sync() will only process NEW geometry added after the batch.
+  private _batchedMode = false;
+  private _batchedFaceIds = new Set<string>();
+  private _batchedEdgeIds = new Set<string>();
+  // GPU picking for batched faces: pick mesh + ID-to-face mapping
+  private _batchedPickMesh: THREE.Mesh | null = null;
+  private _batchedPickIdToFace = new Map<number, string>();
+  // Face ID → triangle vertex range in the batched position buffer (for highlighting)
+  private _batchedFaceTriRange = new Map<string, { start: number; count: number }>();
+  private _batchedPositionBuffer: Float32Array | null = null;
+
   constructor(engine: IGeometryEngine, webglRenderer: WebGLRenderer) {
     this.engine = engine;
     this.webglRenderer = webglRenderer;
@@ -150,7 +165,14 @@ export class SceneBridge {
    * Returns the number of faces synced.
    */
   syncBatched(): number {
+    this._batchedMode = true;
+    this._batchedFaceIds.clear();
+    this._batchedEdgeIds.clear();
     const mesh = this.engine.getMesh();
+
+    // Record all current face/edge IDs as batched (sync() will skip these)
+    mesh.faces.forEach((_, id) => this._batchedFaceIds.add(id));
+    mesh.edges.forEach((_, id) => this._batchedEdgeIds.add(id));
     const faceCount = mesh.faces.size;
     const edgeCount = mesh.edges.size;
 
@@ -223,9 +245,25 @@ export class SceneBridge {
 
     const posArr = new Float32Array(totalTriangles * 3 * 3);
     const normArr = new Float32Array(totalTriangles * 3 * 3);
+    const pickColorArr = new Float32Array(totalTriangles * 3 * 3); // RGB pick colors per vertex
     let triOffset = 0;
+    this._batchedPickIdToFace.clear();
+    this._batchedFaceTriRange.clear();
+    let pickId = 1; // 0 = background/no entity
 
     for (const { indices, verts, normal: n, id } of faceTriData) {
+      // Encode this face's pick ID as RGB
+      const pr = ((pickId >> 16) & 0xff) / 255;
+      const pg = ((pickId >> 8) & 0xff) / 255;
+      const pb = (pickId & 0xff) / 255;
+      this._batchedPickIdToFace.set(pickId, id);
+      pickId++;
+
+      // Record triangle range for this face (vertex offset, vertex count)
+      const faceVertStart = triOffset;
+      const faceVertCount = indices.length;
+      this._batchedFaceTriRange.set(id, { start: faceVertStart, count: faceVertCount });
+
       for (let i = 0; i < indices.length; i++) {
         const v = verts[indices[i]];
         const base = triOffset * 3;
@@ -235,6 +273,9 @@ export class SceneBridge {
         normArr[base] = n.x;
         normArr[base + 1] = n.y;
         normArr[base + 2] = n.z;
+        pickColorArr[base] = pr;
+        pickColorArr[base + 1] = pg;
+        pickColorArr[base + 2] = pb;
         triOffset++;
       }
 
@@ -246,59 +287,179 @@ export class SceneBridge {
 
     console.log(`[syncBatched] Built ${totalTriangles} triangles`);
 
+    this._batchedPositionBuffer = posArr;
+
     const batchGeo = new THREE.BufferGeometry();
     batchGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     batchGeo.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+    batchGeo.computeBoundingSphere();
+    batchGeo.computeBoundingBox();
+
+    console.log(`[syncBatched] Geometry buffer: ${posArr.length} floats, boundingSphere radius: ${batchGeo.boundingSphere?.radius.toFixed(1)}, bbox: ${JSON.stringify(batchGeo.boundingBox?.min)}-${JSON.stringify(batchGeo.boundingBox?.max)}`);
 
     const batchMat = this.faceMaterial.clone();
     const batchMesh = new THREE.Mesh(batchGeo, batchMat);
     batchMesh.name = 'batched-faces';
-    batchMesh.castShadow = true;
+    batchMesh.castShadow = false;  // Shadows disabled for large batched meshes (doubles GPU work)
     batchMesh.receiveShadow = false;
+    batchMesh.frustumCulled = false; // Large meshes can be incorrectly culled
     this.scene.add(batchMesh);
 
-    // --- Batch all edges into one LineSegments ---
-    const edgePositions = new Float32Array(edgeCount * 2 * 3);
+    // --- Build GPU pick mesh for batched faces (vertex colors encode face IDs) ---
+    const pickGeo = new THREE.BufferGeometry();
+    pickGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    pickGeo.setAttribute('color', new THREE.BufferAttribute(pickColorArr, 3));
+    // Use a raw shader material to bypass Three.js color space conversions entirely
+    const pickMat = new THREE.ShaderMaterial({
+      vertexShader: `
+        attribute vec3 color;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        void main() {
+          gl_FragColor = vec4(vColor, 1.0);
+        }
+      `,
+      side: THREE.DoubleSide,
+    });
+    pickMat.toneMapped = false;
+    if (this._batchedPickMesh) {
+      this._batchedPickMesh.geometry.dispose();
+      (this._batchedPickMesh.material as THREE.Material).dispose();
+    }
+    this._batchedPickMesh = new THREE.Mesh(pickGeo, pickMat);
+    this._batchedPickMesh.name = 'batched-pick';
+    this._batchedPickMesh.frustumCulled = false;
+    // Register with renderer so pick system knows about it
+    this.webglRenderer.setBatchedPickMesh(this._batchedPickMesh, this._batchedPickIdToFace);
+    this.webglRenderer.setBatchedFaceHighlightFn((faceId: string) => this.getBatchedFaceHighlightGeometry(faceId));
+
+    console.log(`[syncBatched] GPU pick mesh built: ${this._batchedPickIdToFace.size} face IDs encoded`);
+
+    // --- Batch edges into LineSegments (skip if too many — GPU can crash on huge draw calls) ---
+    const MAX_BATCHED_EDGES = 200000; // ~400K vertices max in one draw call
     let edgeOffset = 0;
 
-    mesh.edges.forEach((edge, id) => {
-      const v1 = this.engine.getVertex(edge.startVertexId);
-      const v2 = this.engine.getVertex(edge.endVertexId);
-      if (!v1 || !v2) return;
+    if (edgeCount <= MAX_BATCHED_EDGES) {
+      const edgePositions = new Float32Array(edgeCount * 2 * 3);
 
-      const base = edgeOffset * 3;
-      edgePositions[base] = v1.position.x;
-      edgePositions[base + 1] = v1.position.y;
-      edgePositions[base + 2] = v1.position.z;
-      edgePositions[base + 3] = v2.position.x;
-      edgePositions[base + 4] = v2.position.y;
-      edgePositions[base + 5] = v2.position.z;
-      edgeOffset += 2;
+      mesh.edges.forEach((edge, id) => {
+        const v1 = this.engine.getVertex(edge.startVertexId);
+        const v2 = this.engine.getVertex(edge.endVertexId);
+        if (!v1 || !v2) return;
 
-      if (this.sceneManager && !this.sceneManager.geometryLayerMap.has(id)) {
-        this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
-      }
-    });
+        const base = edgeOffset * 3;
+        edgePositions[base] = v1.position.x;
+        edgePositions[base + 1] = v1.position.y;
+        edgePositions[base + 2] = v1.position.z;
+        edgePositions[base + 3] = v2.position.x;
+        edgePositions[base + 4] = v2.position.y;
+        edgePositions[base + 5] = v2.position.z;
+        edgeOffset += 2;
 
-    const edgeGeo = new THREE.BufferGeometry();
-    edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePositions.subarray(0, edgeOffset * 3), 3));
-    const edgeBatch = new THREE.LineSegments(edgeGeo, this.edgeMaterial);
-    edgeBatch.name = 'batched-edges';
-    this.overlayScene.add(edgeBatch);
+        if (this.sceneManager && !this.sceneManager.geometryLayerMap.has(id)) {
+          this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
+        }
+      });
 
-    console.log(`[syncBatched] Done: ${totalTriangles} triangles, ${edgeOffset / 2} edges`);
+      const edgeGeo = new THREE.BufferGeometry();
+      edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePositions.subarray(0, edgeOffset * 3), 3));
+      const edgeBatch = new THREE.LineSegments(edgeGeo, this.edgeMaterial);
+      edgeBatch.name = 'batched-edges';
+      edgeBatch.frustumCulled = false;
+      edgeBatch.raycast = () => {}; // Disable raycast on batched edges (too expensive)
+      this.overlayScene.add(edgeBatch);
+    } else {
+      console.log(`[syncBatched] Skipping ${edgeCount} edges (exceeds ${MAX_BATCHED_EDGES} limit — faces-only mode)`);
+    }
+
+    console.log(`[syncBatched] Done: ${totalTriangles} triangles, ${edgeOffset / 2} edges rendered`);
     return faceCount;
   }
 
-  /** Full sync: rebuild Three.js scene from geometry engine state. */
-  sync(): void {
+  /** Create a temporary highlight mesh for a batched face (for selection/pre-selection). */
+  getBatchedFaceHighlightGeometry(faceId: string): THREE.BufferGeometry | null {
+    const range = this._batchedFaceTriRange.get(faceId);
+    if (!range || !this._batchedPositionBuffer) return null;
+
+    const { start, count } = range;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count * 3; i++) {
+      positions[i] = this._batchedPositionBuffer[start * 3 + i];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  /** Check if a face ID is part of the batched mesh. */
+  isBatchedFace(faceId: string): boolean {
+    return this._batchedFaceIds.has(faceId);
+  }
+
+  /** Full sync: rebuild Three.js scene from geometry engine state.
+   *  @param force - If true, skip dirty tracking and rebuild everything (used after undo/redo).
+   */
+  sync(force?: boolean): void {
+    const t0 = performance.now();
     const mesh = this.engine.getMesh();
+
+    // In batched mode, only process NEW faces/edges (not part of original batch)
+    if (!this._batchedMode) {
+      // Remove any leftover batched geometry from a previous syncBatched() call
+      const oldBatch = this.scene.getObjectByName('batched-faces');
+      if (oldBatch) {
+        this.scene.remove(oldBatch);
+        oldBatch.traverse(child => {
+          if (child instanceof THREE.Mesh) child.geometry.dispose();
+        });
+      }
+      const oldEdgeBatch = this.overlayScene.getObjectByName('batched-edges');
+      if (oldEdgeBatch) {
+        this.overlayScene.remove(oldEdgeBatch);
+        if (oldEdgeBatch instanceof THREE.LineSegments) oldEdgeBatch.geometry.dispose();
+      }
+    }
 
     const liveFaceIds = new Set<string>();
     const liveEdgeIds = new Set<string>();
 
+    // Build vertex position snapshot only for non-batched vertices (skip batched to save time)
+    const currentVertexPositions = new Map<string, string>();
+    if (this._batchedMode) {
+      // Only snapshot vertices that belong to new (non-batched) geometry
+      const newVertexIds = new Set<string>();
+      mesh.faces.forEach((face, id) => {
+        if (!this._batchedFaceIds.has(id)) {
+          for (const vid of face.vertexIds) newVertexIds.add(vid);
+        }
+      });
+      mesh.edges.forEach((edge, id) => {
+        if (!this._batchedEdgeIds.has(id)) {
+          newVertexIds.add(edge.startVertexId);
+          newVertexIds.add(edge.endVertexId);
+        }
+      });
+      for (const vid of newVertexIds) {
+        const v = mesh.vertices.get(vid);
+        if (v) currentVertexPositions.set(vid, `${v.position.x.toFixed(6)},${v.position.y.toFixed(6)},${v.position.z.toFixed(6)}`);
+      }
+    } else {
+      mesh.vertices.forEach((v, id) => {
+        currentVertexPositions.set(id, `${v.position.x.toFixed(6)},${v.position.y.toFixed(6)},${v.position.z.toFixed(6)}`);
+      });
+    }
+
     // Sync faces (auto-assign to active layer, respect layer visibility)
     mesh.faces.forEach((face, id) => {
+      // Skip batched faces — they're already in the merged mesh
+      if (this._batchedMode && this._batchedFaceIds.has(id)) return;
       liveFaceIds.add(id);
       if (this.sceneManager) {
         // Auto-assign new geometry to active layer
@@ -307,6 +468,25 @@ export class SceneBridge {
         }
       }
       const visible = this.sceneManager ? this.sceneManager.isEntityVisible(id) : true;
+
+      // Skip re-triangulation if face already exists and its vertices haven't moved
+      if (!force) {
+        const existing = this.faceGroups.get(id);
+        if (existing) {
+          let dirty = false;
+          for (const vid of face.vertexIds) {
+            if (currentVertexPositions.get(vid) !== this.lastVertexPositions.get(vid)) {
+              dirty = true;
+              break;
+            }
+          }
+          if (!dirty) {
+            existing.visible = visible;
+            return; // Skip — geometry unchanged
+          }
+        }
+      }
+
       this.syncFace(id, face);
       const group = this.faceGroups.get(id);
       if (group) group.visible = visible;
@@ -314,6 +494,8 @@ export class SceneBridge {
 
     // Sync edges (auto-assign to active layer, respect layer visibility)
     mesh.edges.forEach((edge, id) => {
+      // Skip batched edges
+      if (this._batchedMode && this._batchedEdgeIds.has(id)) return;
       liveEdgeIds.add(id);
       if (this.sceneManager) {
         if (!this.sceneManager.geometryLayerMap.has(id)) {
@@ -321,6 +503,19 @@ export class SceneBridge {
         }
       }
       const visible = this.sceneManager ? this.sceneManager.isEntityVisible(id) : true;
+
+      // Skip edge update if both vertices unchanged and edge already exists
+      if (!force && this.edgeLines.has(id)) {
+        const v1Hash = currentVertexPositions.get(edge.startVertexId);
+        const v2Hash = currentVertexPositions.get(edge.endVertexId);
+        if (v1Hash === this.lastVertexPositions.get(edge.startVertexId) &&
+            v2Hash === this.lastVertexPositions.get(edge.endVertexId)) {
+          const line = this.edgeLines.get(id)!;
+          line.visible = visible;
+          return; // Skip — unchanged
+        }
+      }
+
       this.syncEdge(id, edge);
       const line = this.edgeLines.get(id);
       if (line) line.visible = visible;
@@ -348,8 +543,12 @@ export class SceneBridge {
       }
     }
 
+    // Update vertex position cache for next sync's dirty detection
+    this.lastVertexPositions = currentVertexPositions;
+
     // Render component bounding boxes
     this.syncComponentBoxes(mesh);
+    console.log(`[SceneBridge.sync] ${(performance.now() - t0).toFixed(1)}ms, faces: ${mesh.faces.size}, edges: ${mesh.edges.size}, force: ${!!force}`);
   }
 
   private componentBoxes = new Map<string, THREE.LineSegments>();
@@ -634,12 +833,62 @@ export class SceneBridge {
       return worldPoint;
     }
 
+    // For very large meshes, skip snap detection entirely — too expensive
+    if (mesh.vertices.size > 10000) {
+      this.hideSnapMarker();
+      return worldPoint;
+    }
+
     let bestDist = Infinity;
     let bestPoint: { x: number; y: number; z: number } | null = null;
 
-    // Check all vertex positions — project to screen and compare distance
+    // For large meshes, use a camera-ray proximity pre-filter instead of
+    // projecting every vertex to screen (which requires matrix multiplication).
+    const useFastFilter = mesh.vertices.size > 1000;
+    let rayOrigin: { x: number; y: number; z: number } | null = null;
+    let rayDir: { x: number; y: number; z: number } | null = null;
+    let maxWorldDist = 0;
+
+    if (useFastFilter) {
+      const ray = camera.screenToRay(screenX, screenY, viewportWidth, viewportHeight);
+      if (ray) {
+        rayOrigin = ray.origin;
+        rayDir = ray.direction;
+        // Estimate world-space snap radius from screen pixels
+        const camPos = camera.position || { x: 0, y: 10, z: 10 };
+        const camDist = worldPoint ? Math.sqrt(
+          (worldPoint.x - camPos.x) ** 2 + (worldPoint.y - camPos.y) ** 2 + (worldPoint.z - camPos.z) ** 2
+        ) : 20;
+        maxWorldDist = camDist * snapRadiusPx * 0.002; // Approximate screen-to-world scale
+      }
+    }
+
+    // Check all vertex positions
+    const margin = snapRadiusPx * 2;
     mesh.vertices.forEach((vertex) => {
+      // Fast 3D proximity filter for large meshes: skip vertices far from cursor ray
+      if (useFastFilter && rayOrigin && rayDir) {
+        const toVert = {
+          x: vertex.position.x - rayOrigin.x,
+          y: vertex.position.y - rayOrigin.y,
+          z: vertex.position.z - rayOrigin.z,
+        };
+        const t = toVert.x * rayDir.x + toVert.y * rayDir.y + toVert.z * rayDir.z;
+        if (t < 0) return; // Behind camera
+        const closestOnRay = {
+          x: rayOrigin.x + rayDir.x * t,
+          y: rayOrigin.y + rayDir.y * t,
+          z: rayOrigin.z + rayDir.z * t,
+        };
+        const dx3d = vertex.position.x - closestOnRay.x;
+        const dy3d = vertex.position.y - closestOnRay.y;
+        const dz3d = vertex.position.z - closestOnRay.z;
+        if (dx3d * dx3d + dy3d * dy3d + dz3d * dz3d > maxWorldDist * maxWorldDist) return;
+      }
+
       const screenPos = camera.worldToScreen(vertex.position, viewportWidth, viewportHeight);
+      if (screenPos.x < -margin || screenPos.x > viewportWidth + margin ||
+          screenPos.y < -margin || screenPos.y > viewportHeight + margin) return;
       const dx = screenPos.x - screenX;
       const dy = screenPos.y - screenY;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -650,60 +899,78 @@ export class SceneBridge {
       }
     });
 
-    // Also check edge midpoints
-    mesh.edges.forEach((edge) => {
-      const v1 = mesh.vertices.get(edge.startVertexId);
-      const v2 = mesh.vertices.get(edge.endVertexId);
-      if (!v1 || !v2) return;
+    // Check edge midpoints (skip for large meshes — vertex snap is sufficient)
+    if (mesh.edges.size <= 2000) {
+      mesh.edges.forEach((edge) => {
+        const v1 = mesh.vertices.get(edge.startVertexId);
+        const v2 = mesh.vertices.get(edge.endVertexId);
+        if (!v1 || !v2) return;
 
-      const mid = {
-        x: (v1.position.x + v2.position.x) / 2,
-        y: (v1.position.y + v2.position.y) / 2,
-        z: (v1.position.z + v2.position.z) / 2,
-      };
-      const screenPos = camera.worldToScreen(mid, viewportWidth, viewportHeight);
-      const dx = screenPos.x - screenX;
-      const dy = screenPos.y - screenY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+        const mid = {
+          x: (v1.position.x + v2.position.x) / 2,
+          y: (v1.position.y + v2.position.y) / 2,
+          z: (v1.position.z + v2.position.z) / 2,
+        };
 
-      if (dist < snapRadiusPx && dist < bestDist) {
-        bestDist = dist;
-        bestPoint = mid;
-      }
-    });
+        // Fast 3D proximity filter
+        if (useFastFilter && rayOrigin && rayDir) {
+          const toMid = { x: mid.x - rayOrigin.x, y: mid.y - rayOrigin.y, z: mid.z - rayOrigin.z };
+          const t = toMid.x * rayDir.x + toMid.y * rayDir.y + toMid.z * rayDir.z;
+          if (t < 0) return;
+          const cx = rayOrigin.x + rayDir.x * t - mid.x;
+          const cy = rayOrigin.y + rayDir.y * t - mid.y;
+          const cz = rayOrigin.z + rayDir.z * t - mid.z;
+          if (cx * cx + cy * cy + cz * cz > maxWorldDist * maxWorldDist) return;
+        }
 
-    // Check edge-edge intersection points
-    const edgeArray = Array.from(mesh.edges.values());
-    for (let i = 0; i < edgeArray.length; i++) {
-      const e1 = edgeArray[i];
-      const a1 = mesh.vertices.get(e1.startVertexId);
-      const a2 = mesh.vertices.get(e1.endVertexId);
-      if (!a1 || !a2) continue;
-
-      for (let j = i + 1; j < edgeArray.length; j++) {
-        const e2 = edgeArray[j];
-        const b1 = mesh.vertices.get(e2.startVertexId);
-        const b2 = mesh.vertices.get(e2.endVertexId);
-        if (!b1 || !b2) continue;
-
-        // Skip if edges share a vertex (they meet at an endpoint, already snappable)
-        if (e1.startVertexId === e2.startVertexId || e1.startVertexId === e2.endVertexId ||
-            e1.endVertexId === e2.startVertexId || e1.endVertexId === e2.endVertexId) continue;
-
-        // Find closest point between two line segments
-        const intersection = this.edgeEdgeIntersection(
-          a1.position, a2.position, b1.position, b2.position
-        );
-        if (!intersection) continue;
-
-        const screenPos = camera.worldToScreen(intersection, viewportWidth, viewportHeight);
+        const screenPos = camera.worldToScreen(mid, viewportWidth, viewportHeight);
+        if (screenPos.x < -margin || screenPos.x > viewportWidth + margin ||
+            screenPos.y < -margin || screenPos.y > viewportHeight + margin) return;
         const dx = screenPos.x - screenX;
         const dy = screenPos.y - screenY;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist < snapRadiusPx && dist < bestDist) {
           bestDist = dist;
-          bestPoint = intersection;
+          bestPoint = mid;
+        }
+      });
+    }
+
+    // Check edge-edge intersection points (skip if too many edges — O(n²) is too expensive)
+    if (mesh.edges.size <= 500) {
+      const edgeArray = Array.from(mesh.edges.values());
+      for (let i = 0; i < edgeArray.length; i++) {
+        const e1 = edgeArray[i];
+        const a1 = mesh.vertices.get(e1.startVertexId);
+        const a2 = mesh.vertices.get(e1.endVertexId);
+        if (!a1 || !a2) continue;
+
+        for (let j = i + 1; j < edgeArray.length; j++) {
+          const e2 = edgeArray[j];
+          const b1 = mesh.vertices.get(e2.startVertexId);
+          const b2 = mesh.vertices.get(e2.endVertexId);
+          if (!b1 || !b2) continue;
+
+          // Skip if edges share a vertex (they meet at an endpoint, already snappable)
+          if (e1.startVertexId === e2.startVertexId || e1.startVertexId === e2.endVertexId ||
+              e1.endVertexId === e2.startVertexId || e1.endVertexId === e2.endVertexId) continue;
+
+          // Find closest point between two line segments
+          const intersection = this.edgeEdgeIntersection(
+            a1.position, a2.position, b1.position, b2.position
+          );
+          if (!intersection) continue;
+
+          const screenPos = camera.worldToScreen(intersection, viewportWidth, viewportHeight);
+          const dx = screenPos.x - screenX;
+          const dy = screenPos.y - screenY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < snapRadiusPx && dist < bestDist) {
+            bestDist = dist;
+            bestPoint = intersection;
+          }
         }
       }
     }
@@ -716,8 +983,11 @@ export class SceneBridge {
 
     // On-edge snap: find the closest point on any edge to the cursor ray.
     // Lower priority than point snaps — only used when no point snap is found.
-    const ray = camera.screenToRay(screenX, screenY, viewportWidth, viewportHeight);
-    if (ray) {
+    // Skip for large meshes — too many edges to check per frame.
+    const ray2 = mesh.edges.size <= 2000
+      ? camera.screenToRay(screenX, screenY, viewportWidth, viewportHeight)
+      : null;
+    if (ray2) {
       let bestEdgeDist = Infinity;
       let bestEdgePoint: { x: number; y: number; z: number } | null = null;
 
@@ -728,7 +998,7 @@ export class SceneBridge {
 
         // Closest point between ray and edge segment
         const p = this.closestPointOnSegmentToRay(
-          v1.position, v2.position, ray.origin, ray.direction,
+          v1.position, v2.position, ray2.origin, ray2.direction,
         );
         if (!p) return;
 

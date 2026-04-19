@@ -100,99 +100,158 @@ export class Viewport implements IViewport {
     return this._cameraController.worldToScreen(point, this._width, this._height);
   }
 
+  /** Reusable raycaster — avoids allocating a new one per call. */
+  private _raycaster = new THREE.Raycaster();
+  private _ndcVec = new THREE.Vector2();
+
   raycastScene(
     screenX: number,
     screenY: number,
   ): Array<{ entityId: string; point: Vec3; distance: number }> {
-    // Use stored dimensions — they're set by ResizeObserver and match the
-    // camera's aspect ratio exactly (both set from the same resize event).
     const w = this._width;
     const h = this._height;
 
-    const ndc = new THREE.Vector2(
-      (screenX / w) * 2 - 1,
-      -(screenY / h) * 2 + 1,
-    );
-
-    // Get the Three.js camera and force ALL matrices to be current.
-    // This is critical: after orbit/pan/zoom, the camera's position and
-    // rotation are set via lookAt(), but matrixWorld and projectionMatrixInverse
-    // may be stale until the next render. We must update them before raycasting.
     const camera = this._cameraController.getThreeCamera();
-    if (camera instanceof THREE.PerspectiveCamera) {
-      camera.updateProjectionMatrix();
-    } else if (camera instanceof THREE.OrthographicCamera) {
-      camera.updateProjectionMatrix();
-    }
+    (camera as any).updateProjectionMatrix?.();
     camera.updateMatrixWorld(true);
-    // projectionMatrixInverse is needed by unproject() inside setFromCamera
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 
-    const raycaster = new THREE.Raycaster();
-    // Compute a line threshold that corresponds to a fixed number of screen pixels
-    // regardless of zoom level. We convert ~10 pixels into world units at the
-    // camera's current distance to its look-at target.
+    this._ndcVec.set((screenX / w) * 2 - 1, -(screenY / h) * 2 + 1);
+
+    // Set up raycaster with adaptive line threshold
     const camTarget = (this._cameraController as any).target || { x: 0, y: 0, z: 0 };
     const camDist = camera.position.distanceTo(new THREE.Vector3(camTarget.x, camTarget.y, camTarget.z));
     let pixelSize: number;
     if (camera instanceof THREE.PerspectiveCamera) {
-      // World units per pixel at target distance
       const vFov = (camera.fov * Math.PI) / 180;
       pixelSize = (2 * camDist * Math.tan(vFov / 2)) / h;
     } else {
-      // Orthographic: world units per pixel
       const orthoH = ((camera as THREE.OrthographicCamera).top - (camera as THREE.OrthographicCamera).bottom);
       pixelSize = orthoH / h;
     }
-    const threshold = Math.max(0.01, pixelSize * 10); // ~10 screen pixels
-    raycaster.params.Line = { threshold };
-    raycaster.params.Points = { threshold };
-    raycaster.setFromCamera(ndc, camera);
+    const threshold = Math.max(0.01, pixelSize * 10);
+    this._raycaster.params.Line = { threshold };
+    this._raycaster.params.Points = { threshold };
+    this._raycaster.setFromCamera(this._ndcVec, camera);
 
-    // Raycast main scene (faces) AND overlay scene (edges)
+    // Raycast main scene (faces) then overlay (edges).
+    // Use firstHitOnly on faces for early exit on large meshes.
     const scene = this._webglRenderer.getScene();
     const overlayScene = this._webglRenderer.getOverlayScene();
-    const intersects = [
-      ...raycaster.intersectObjects(scene.children, true),
-      ...raycaster.intersectObjects(overlayScene.children, true),
-    ];
+
+    (this._raycaster as any).firstHitOnly = true;
+    const faceIntersects = this._raycaster.intersectObjects(scene.children, true);
+    (this._raycaster as any).firstHitOnly = false;
+    const edgeIntersects = this._raycaster.intersectObjects(overlayScene.children, true);
 
     const faceHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     const edgeHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     const seenIds = new Set<string>();
 
-    for (const hit of intersects) {
+    // Process edge hits first (edges take priority for selection)
+    for (const hit of edgeIntersects) {
       let obj: THREE.Object3D | null = hit.object;
       while (obj) {
         if (obj.userData.entityId) {
           const eid = obj.userData.entityId as string;
           if (!seenIds.has(eid)) {
             seenIds.add(eid);
-            const entry = {
+            edgeHits.push({
               entityId: eid,
               point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
               distance: hit.distance,
-            };
-            // Separate faces from edges — faces take priority
-            if (obj.userData.entityType === 'edge' || hit.object instanceof THREE.Line) {
-              edgeHits.push(entry);
-            } else {
-              faceHits.push(entry);
-            }
+            });
           }
           break;
         }
         obj = obj.parent;
       }
+      // Only need the closest edge hit
+      if (edgeHits.length > 0) break;
     }
 
-    // If an edge was hit, it means the cursor is very close to it
-    // (within the Line threshold). Prioritize the edge over the face
-    // so edges are actually selectable. If no edge hit, faces come first.
+    // Process face hits
+    for (const hit of faceIntersects) {
+      let obj: THREE.Object3D | null = hit.object;
+      while (obj) {
+        if (obj.userData.entityId) {
+          const eid = obj.userData.entityId as string;
+          if (!seenIds.has(eid)) {
+            seenIds.add(eid);
+            faceHits.push({
+              entityId: eid,
+              point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+              distance: hit.distance,
+            });
+          }
+          break;
+        }
+        obj = obj.parent;
+      }
+      // Only need the closest face hit
+      if (faceHits.length > 0) break;
+    }
+
     if (edgeHits.length > 0) {
       return [...edgeHits, ...faceHits];
     }
     return faceHits;
+  }
+
+  /** Lightweight raycast: edges only (overlay scene). Skip the expensive main scene traversal.
+   *  Use together with GPU pick for faces to get full coverage without blocking. */
+  raycastEdgesOnly(
+    screenX: number,
+    screenY: number,
+  ): Array<{ entityId: string; point: Vec3; distance: number }> {
+    const w = this._width;
+    const h = this._height;
+
+    const camera = this._cameraController.getThreeCamera();
+    (camera as any).updateProjectionMatrix?.();
+    camera.updateMatrixWorld(true);
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+
+    this._ndcVec.set((screenX / w) * 2 - 1, -(screenY / h) * 2 + 1);
+
+    // Adaptive line threshold
+    const camTarget = (this._cameraController as any).target || { x: 0, y: 0, z: 0 };
+    const camDist = camera.position.distanceTo(new THREE.Vector3(camTarget.x, camTarget.y, camTarget.z));
+    let pixelSize: number;
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const vFov = (camera.fov * Math.PI) / 180;
+      pixelSize = (2 * camDist * Math.tan(vFov / 2)) / h;
+    } else {
+      const orthoH = ((camera as THREE.OrthographicCamera).top - (camera as THREE.OrthographicCamera).bottom);
+      pixelSize = orthoH / h;
+    }
+    const threshold = Math.max(0.01, pixelSize * 10);
+    this._raycaster.params.Line = { threshold };
+    this._raycaster.params.Points = { threshold };
+    this._raycaster.setFromCamera(this._ndcVec, camera);
+
+    // Only raycast overlay scene (edges) — much fewer objects than main scene
+    const overlayScene = this._webglRenderer.getOverlayScene();
+    const edgeIntersects = this._raycaster.intersectObjects(overlayScene.children, true);
+
+    const hits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
+    for (const hit of edgeIntersects) {
+      let obj: THREE.Object3D | null = hit.object;
+      while (obj) {
+        if (obj.userData.entityId) {
+          const eid = obj.userData.entityId as string;
+          hits.push({
+            entityId: eid,
+            point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+            distance: hit.distance,
+          });
+          break;
+        }
+        obj = obj.parent;
+      }
+      if (hits.length > 0) break; // only need closest
+    }
+    return hits;
   }
 
   getWidth(): number { return this._width; }

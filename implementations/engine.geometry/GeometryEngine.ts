@@ -572,8 +572,13 @@ export class GeometryEngine implements IGeometryEngine {
     faces: number[][],
     standaloneEdges?: [number, number][],
   ): string[] {
+    // For very large models (>10K faces), skip edge extraction to save ~30%+ memory.
+    // These models use batched rendering (view-only, no per-entity selection).
+    const SKIP_EDGES_THRESHOLD = 10000;
+    const skipEdges = faces.length > SKIP_EDGES_THRESHOLD;
+
     // Clean faces and collect unique edge pairs (by vertex index)
-    const edgeSet = new Set<number>();
+    const edgeSet = skipEdges ? null : new Set<number>();
     const edgeKey = (a: number, b: number) => a < b ? a * 2000000 + b : b * 2000000 + a;
     const edgePairs: [number, number][] = [];
 
@@ -617,20 +622,26 @@ export class GeometryEngine implements IGeometryEngine {
 
       cleanedFaces.push(cleaned);
 
-      for (let i = 0; i < cleaned.length; i++) {
-        const a = cleaned[i], b = cleaned[(i + 1) % cleaned.length];
-        const k = edgeKey(a, b);
-        if (!edgeSet.has(k)) { edgeSet.add(k); edgePairs.push([a, b]); }
+      if (!skipEdges) {
+        for (let i = 0; i < cleaned.length; i++) {
+          const a = cleaned[i], b = cleaned[(i + 1) % cleaned.length];
+          const k = edgeKey(a, b);
+          if (!edgeSet!.has(k)) { edgeSet!.add(k); edgePairs.push([a, b]); }
+        }
       }
     }
 
-    if (standaloneEdges) {
+    if (!skipEdges && standaloneEdges) {
       for (const [a, b] of standaloneEdges) {
         if (a >= 0 && b >= 0 && a < vertices.length && b < vertices.length) {
           const k = edgeKey(a, b);
-          if (!edgeSet.has(k)) { edgeSet.add(k); edgePairs.push([a, b]); }
+          if (!edgeSet!.has(k)) { edgeSet!.add(k); edgePairs.push([a, b]); }
         }
       }
+    }
+
+    if (skipEdges) {
+      console.log(`[bulkImport] Skipping edge creation for ${faces.length} faces (view-only mode, saves ~30% memory)`);
     }
 
     // Fast bulk add to mesh — numeric IDs, no UUIDs, no half-edges

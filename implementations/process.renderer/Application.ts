@@ -143,8 +143,8 @@ export class Application implements IApplication {
         case 'save': this.saveDocument(); break;
         case 'save-as': this.saveDocumentAs(); break;
         case 'import': this.importFile(); break;
-        case 'undo': this.document.history.undo(); this.sceneBridge.sync(); break;
-        case 'redo': this.document.history.redo(); this.sceneBridge.sync(); break;
+        case 'undo': this.document.history.undo(); this.sceneBridge.sync(true); break;
+        case 'redo': this.document.history.redo(); this.sceneBridge.sync(true); break;
         case 'delete':
           const ids = Array.from(this.document.selection.state.entityIds);
           this.document.history.beginTransaction('Delete');
@@ -261,7 +261,7 @@ export class Application implements IApplication {
   async newDocument(): Promise<void> {
     this.document.newDocument();
     this.document.selection.clear();
-    this.sceneBridge.sync();
+    this.sceneBridge.sync(true);
   }
 
   async openDocument(): Promise<void> {
@@ -422,7 +422,10 @@ export class Application implements IApplication {
       geo.bulkImport(vertices, faces, standaloneEdges.length > 0 ? standaloneEdges : undefined);
       const t1 = performance.now();
       console.log(`[import] bulkImport completed in ${(t1 - t0).toFixed(0)}ms`);
-      console.log(`[import] Memory after bulkImport: ${(performance as any).memory ? ((performance as any).memory.usedJSHeapSize / 1024 / 1024).toFixed(0) + 'MB' : 'N/A'}`);
+      // Free intermediate parse data to reduce peak memory
+      vertices.length = 0;
+      faces.length = 0;
+      standaloneEdges.length = 0;
     } catch (e) {
       console.error('[import] bulkImport FAILED:', e);
       this.emitProgress('Import failed: ' + (e as Error).message, 1, false);
@@ -437,12 +440,13 @@ export class Application implements IApplication {
       const faceCount = geo.getMesh().faces.size;
       console.log(`[import] Starting scene sync for ${faceCount} faces...`);
       const t2 = performance.now();
-      // Use batched sync for large models (>1000 faces) to avoid OOM from per-face meshes
-      if (faceCount > 1000) {
-        console.log(`[import] Using batched sync (${faceCount} faces)`);
+      // Use batched sync only for very large models (view-only, no per-entity selection)
+      // Per-face sync for everything else so selection/highlighting works
+      if (faceCount > 10000) {
+        console.log(`[import] Using batched sync (${faceCount} faces — view-only mode)`);
         this.sceneBridge.syncBatched();
       } else {
-        this.sceneBridge.sync();
+        this.sceneBridge.sync(true);
       }
       console.log(`[import] Scene sync completed in ${(performance.now() - t2).toFixed(0)}ms`);
     } catch (e) {

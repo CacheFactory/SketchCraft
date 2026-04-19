@@ -22,6 +22,10 @@ export class LineTool extends BaseTool {
   private lastScreenY = 0;
   /** Axis lock: 'x' | 'y' | 'z' | null */
   private axisLock: 'x' | 'y' | 'z' | null = null;
+  /** Whether the current point is parallel-snapped */
+  private parallelSnapped = false;
+  /** Guide line ID for parallel snap visualization */
+  private static readonly PARALLEL_GUIDE_ID = 'parallel-snap-guide';
 
   activate(): void {
     super.activate();
@@ -36,6 +40,7 @@ export class LineTool extends BaseTool {
     } else if (this.points.length === 1) {
       this.abortTransaction();
     }
+    this.hideParallelGuide();
     this.reset();
     super.deactivate();
   }
@@ -45,7 +50,16 @@ export class LineTool extends BaseTool {
 
     const rawPoint = this.getDrawPoint(event);
     if (!rawPoint) return;
-    const point = this.applyAxisLock(rawPoint);
+    let point = this.applyAxisLock(rawPoint);
+
+    // Apply parallel snap on click (matches the constraint shown in onMouseMove)
+    if (this.phase === 'drawing' && this.points.length > 0 && !this.axisLock) {
+      const anchor = this.points[this.points.length - 1];
+      const result = this.tryParallelSnap(anchor, point);
+      if (result) {
+        point = result.snappedPoint;
+      }
+    }
 
     if (this.phase === 'idle') {
       this.beginTransaction('Draw Line');
@@ -95,7 +109,26 @@ export class LineTool extends BaseTool {
     const rawPoint = this.getDrawPoint(event);
     if (!rawPoint) return;
 
-    this.currentPoint = this.applyAxisLock(rawPoint);
+    let point = this.applyAxisLock(rawPoint);
+
+    // Parallel snap: when drawing and no axis lock, check if direction is
+    // roughly parallel to any existing edge and constrain if so.
+    this.parallelSnapped = false;
+    if (this.phase === 'drawing' && this.points.length > 0 && !this.axisLock) {
+      const anchor = this.points[this.points.length - 1];
+      const result = this.tryParallelSnap(anchor, point);
+      if (result) {
+        point = result.snappedPoint;
+        this.parallelSnapped = true;
+        this.showParallelGuide(result.edgeStart, result.edgeEnd);
+      } else {
+        this.hideParallelGuide();
+      }
+    } else {
+      this.hideParallelGuide();
+    }
+
+    this.currentPoint = point;
 
     if (this.phase === 'drawing' && this.points.length > 0) {
       const lastPoint = this.points[this.points.length - 1];
@@ -307,6 +340,8 @@ export class LineTool extends BaseTool {
     this.vertexIds = [];
     this.currentPoint = null;
     this.axisLock = null;
+    this.parallelSnapped = false;
+    this.hideParallelGuide();
     this.setPhase('idle');
     this.setVCBValue('');
   }
@@ -327,5 +362,83 @@ export class LineTool extends BaseTool {
         this.document.geometry.createFace(uniqueIds);
       } catch {}
     }
+  }
+
+  // ── Parallel snap ─────────────────────────────────────────
+
+  /** Angle threshold in radians (~5°) for triggering parallel snap. */
+  private static readonly PARALLEL_THRESHOLD = 0.087;
+
+  /**
+   * Check if the line from anchor→point is roughly parallel to any existing
+   * edge. If so, return the constrained point and the reference edge endpoints.
+   */
+  private tryParallelSnap(
+    anchor: Vec3, point: Vec3,
+  ): { snappedPoint: Vec3; edgeStart: Vec3; edgeEnd: Vec3 } | null {
+    const offset = vec3.sub(point, anchor);
+    const len = vec3.length(offset);
+    if (len < 0.01) return null; // Too short to determine direction
+
+    const dir = vec3.normalize(offset);
+    const mesh = this.document.geometry.getMesh();
+
+    // Skip parallel snap for large meshes to avoid per-frame lag
+    if (mesh.edges.size > 2000) return null;
+
+    const threshold = LineTool.PARALLEL_THRESHOLD;
+
+    let bestAngle = threshold;
+    let bestEdgeDir: Vec3 | null = null;
+    let bestEdgeStart: Vec3 | null = null;
+    let bestEdgeEnd: Vec3 | null = null;
+
+    mesh.edges.forEach((edge) => {
+      const v1 = mesh.vertices.get(edge.startVertexId);
+      const v2 = mesh.vertices.get(edge.endVertexId);
+      if (!v1 || !v2) return;
+
+      const edgeVec = vec3.sub(v2.position, v1.position);
+      const edgeLen = vec3.length(edgeVec);
+      if (edgeLen < 0.01) return;
+
+      const edgeDir = vec3.normalize(edgeVec);
+
+      // Check parallelism (handle both directions)
+      const dot = Math.abs(vec3.dot(dir, edgeDir));
+      // dot ≈ 1 means parallel; angle = acos(dot)
+      if (dot > 0.9996) return; // Already nearly exact — skip (acos would be ~0)
+      const angle = Math.acos(Math.min(dot, 1.0));
+
+      if (angle < bestAngle) {
+        bestAngle = angle;
+        // Choose direction that aligns with user's cursor direction
+        bestEdgeDir = vec3.dot(dir, edgeDir) >= 0 ? edgeDir : vec3.negate(edgeDir);
+        bestEdgeStart = { ...v1.position };
+        bestEdgeEnd = { ...v2.position };
+      }
+    });
+
+    if (!bestEdgeDir || !bestEdgeStart || !bestEdgeEnd) return null;
+
+    // Constrain: project offset onto the parallel edge direction
+    const projLen = vec3.dot(offset, bestEdgeDir);
+    const snappedPoint = vec3.add(anchor, vec3.mul(bestEdgeDir, projLen));
+
+    return { snappedPoint, edgeStart: bestEdgeStart, edgeEnd: bestEdgeEnd };
+  }
+
+  /** Show a magenta dashed guide line on the reference edge. */
+  private showParallelGuide(start: Vec3, end: Vec3): void {
+    this.viewport.renderer.addGuideLine(
+      LineTool.PARALLEL_GUIDE_ID, start, end,
+      { r: 0.8, g: 0, b: 0.8 }, // magenta
+      true, // dashed
+    );
+  }
+
+  /** Remove the parallel snap guide line. */
+  private hideParallelGuide(): void {
+    this.viewport.renderer.removeGuideLine(LineTool.PARALLEL_GUIDE_ID);
   }
 }

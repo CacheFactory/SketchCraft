@@ -907,7 +907,14 @@ nodes:
         \        and localClippingEnabled. Infinite shader-based ground grid. Selection highlight swaps face\n\
         \        materials (polygonOffset -1) and edge materials (camera-distance-scaled glow tube cylinders).\n\
         \        Pre-selection=orange, selection=blue. Edge lines in overlay scene (separate pass after depth\n\
-        \        clear). setSectionPlane() for real-time clipping. Edges prioritized over faces in raycast."
+        \        clear). setSectionPlane() for real-time clipping.\n\
+        \        GPU picking: renders entity IDs as unique colors to offscreen framebuffer via ShaderMaterial\n\
+        \        (bypasses Three.js color management). Per-entity pick meshes for small models, vertex-color-encoded\n\
+        \        batched pick mesh for large imported models. Pick buffer re-rendered only on camera move.\n\
+        \        Batched mode: syncBatched() merges all faces into single BufferGeometry with frustumCulled=false,\n\
+        \        castShadow=false. Edges >200K skipped. Batched face highlighting via temporary extracted geometry.\n\
+        \        Memory optimizations: glow tube object pool, numeric camera movement detection (no string allocation),\n\
+        \        reusable Vector2/Vector3/Color/Plane instances."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -3038,7 +3045,10 @@ nodes:
         \ (tangent/bitangent from first edge) so\n          textures stick to faces when moved/rotated. Edges as THREE.Line\
         \ in overlay scene.\n          Component bounding boxes as purple wireframe. Snap system: vertices, midpoints,\n  \
         \        and edge-edge intersections. Texture cache for data URL → THREE.Texture.\n          Preview lines and snap\
-        \ markers non-raycastable (raycast=()=>{})."
+        \ markers non-raycastable (raycast=()=>{}).\n          Batched mode: syncBatched() merges all faces into single BufferGeometry\
+        \ for large\n          imports (>10K faces). Tracks batched face/edge IDs so sync() only processes NEW geometry.\n  \
+        \        GPU pick mesh with vertex-color-encoded face IDs (ShaderMaterial, per-face RGB).\n          Batched edges skip\
+        \ raycast. Edge creation skipped for >10K face imports (~375MB savings)."
   uuid: sBr1dg3X
 - id: app.singleton
   kind: service
