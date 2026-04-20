@@ -51,7 +51,7 @@ export class DimensionTool extends BaseTool {
       this.endVertexId = this.findNearestVertexId(point);
       this.step = 2;
       const dist = vec3.distance(this.startPoint!, point);
-      this.setVCBValue(dist.toFixed(4));
+      this.setVCBValue(this.formatDist(dist));
       this.setStatus('Move to offset dimension line, then click to place.');
     } else if (this.step === 2) {
       this.createDimension(point);
@@ -63,7 +63,7 @@ export class DimensionTool extends BaseTool {
     if (point) this.currentPoint = point;
 
     if (this.step === 1 && this.startPoint && point) {
-      this.setVCBValue(vec3.distance(this.startPoint, point).toFixed(4));
+      this.setVCBValue(this.formatDist(vec3.distance(this.startPoint, point)));
     }
   }
 
@@ -87,7 +87,7 @@ export class DimensionTool extends BaseTool {
       const direction = vec3.normalize(delta);
       this.endPoint = vec3.add(this.startPoint, vec3.mul(direction, dist));
       this.step = 2;
-      this.setVCBValue(dist.toFixed(4));
+      this.setVCBValue(this.formatDist(dist));
       this.setStatus('Move to offset dimension line, then click to place.');
     }
   }
@@ -254,7 +254,7 @@ export class DimensionTool extends BaseTool {
       y: midpoint.y + offsetDir.y * 0.15,
       z: midpoint.z + offsetDir.z * 0.15,
     };
-    const sprite = this.createDimensionText(dimId, `${distance.toFixed(4)}`, textPos);
+    const sprite = this.createDimensionText(dimId, this.formatDist(distance), textPos);
 
     if (sprite) {
       // Compute offset distance from the measurement line to the dimension line
@@ -275,7 +275,7 @@ export class DimensionTool extends BaseTool {
     }
 
     this.commitTransaction();
-    this.setStatus(`Dimension placed: ${distance.toFixed(4)}`);
+    this.setStatus(`Dimension placed: ${this.formatDist(distance)}`);
     this.reset();
   }
 

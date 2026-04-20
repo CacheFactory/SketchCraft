@@ -61,7 +61,7 @@ export class PolygonTool extends BaseTool {
 
     const projected = vec3.projectOnPlane(point, this.drawPlane);
     this.currentRadius = vec3.distance(this.center, projected);
-    this.setVCBValue(this.currentRadius.toFixed(3));
+    this.setVCBValue(this.formatDist(this.currentRadius));
   }
 
   onKeyDown(event: ToolKeyEvent): void {

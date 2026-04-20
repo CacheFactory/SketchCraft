@@ -85,7 +85,7 @@ export class MoveTool extends BaseTool {
 
     this.currentDest = point;
     const offset = vec3.sub(point, this.origin);
-    this.setVCBValue(vec3.length(offset).toFixed(3));
+    this.setVCBValue(this.formatDist(vec3.length(offset)));
 
     // Live preview: move vertices to new positions
     this.applyOffset(offset);

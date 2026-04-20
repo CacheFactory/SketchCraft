@@ -737,8 +737,10 @@ nodes:
       status: implemented
     docs:
       description: "Three-step workflow (start, end, offset) places linear dimensions with extension lines,\n\
-        \        tick marks, and text sprite. Dimensions are selectable and movable (constrained perpendicular\n\
-        \        to measurement line). Associative — tracks vertex IDs and updates when geometry moves.\n\
+        \        tick marks, and text sprite. Displays values with unit labels (mm, cm, m, \", ') at most\n\
+        \        1 decimal place via formatDistance(). Dimensions are selectable and movable (constrained\n\
+        \        perpendicular to measurement line). Associative — tracks vertex IDs and updates when\n\
+        \        geometry moves. DimensionStore.syncToGeometry() updates sprite text with current units.\n\
         \        Supports undo. Uses DimensionStore singleton for state management."
   uuid: gHVP0JyU
 - id: tool.text
@@ -1442,7 +1444,11 @@ nodes:
         \          Serialization for undo/redo snapshots. 101 integration tests.\n\
         \          IFace.generation: monotonically increasing counter bumped on face creation and\n\
         \          material assignment changes. Used by SceneBridge for dirty tracking — avoids\n\
-        \          per-vertex position hashing when only material/topology changed."
+        \          per-vertex position hashing when only material/topology changed.\n\
+        \          splitFaceWithPath scans the full chain to find entry/exit points on a face\n\
+        \          boundary (handles lines extending beyond face). Wrapping edge insertion uses\n\
+        \          modular indexing. autoCreateFaces uses loopContainsInteriorVertex — 2D\n\
+        \          point-in-polygon test rejects loops enclosing subdivided geometry."
       notes: "## Typed Interface\n\n```typescript\nimport { Vector3, Matrix4, Plane, BoundingBox } from '../math/types';\n\
         \n// ========== Core Geometry Types ==========\n\nexport interface GeometryId {\n  readonly id: string; // unique\
         \ stable ID (UUID)\n}\n\nexport interface Vertex extends GeometryId {\n  position: Vector3; // float64\n  edges: HalfEdge[];\
@@ -3119,11 +3125,15 @@ nodes:
     docs:
       description: "Three auto-face mechanisms in GeometryEngine:\n          (1) autoCreateFaces via createEdgeWithAutoFace():\
         \ BFS finds ALL closed coplanar loops (not just\n          shortest) through existing edges. Coplanarity tolerance\
-        \ is 0.05 (practical for hand-drawn geometry).\n          (2) splitFaceWithEdge: splits face when edge connects two\
-        \ non-adjacent boundary vertices.\n          (3) splitFaceWithPath(): splits face along multi-vertex path (arc). Handles\
-        \ endpoints ON face\n          edges via proximity detection (0.05 threshold), vertex insertion, and edge splitting.\
-        \ Both\n          resulting faces include arc vertices on shared boundary (no chord edge).\n          Guards: no self-edges,\
-        \ no zero-length edges, no degenerate faces (< 3 unique vertices).\n          Arc tool uses plain createEdge + splitFaceWithPath.\
+        \ is 0.05 (practical for hand-drawn geometry).\n          Two minimality checks: chord detection (edges between non-adjacent loop\n\
+        \          vertices) AND loopContainsInteriorVertex (2D point-in-polygon rejects loops\n\
+        \          enclosing other coplanar vertices with edges).\n          (2) splitFaceWithEdge: splits face when edge connects two\
+        \ non-adjacent boundary vertices.\n          (3) splitFaceWithPath(): splits face along multi-vertex path (arc). Scans\n\
+        \          full chain to find first/last vertices on face boundary (handles lines extending\n\
+        \          beyond the face). Handles endpoints ON face\n          edges via proximity detection (0.05 threshold), vertex insertion\
+        \ with modular\n          indexing for wrapping edges, and edge splitting. Both\n          resulting faces include arc vertices\
+        \ on shared boundary (no chord edge).\n          Guards: no self-edges, no zero-length edges, no degenerate faces (< 3 unique\
+        \ vertices).\n          Arc tool uses plain createEdge + splitFaceWithPath.\
         \ Line tool uses createEdgeWithAutoFace."
   uuid: sAutFce1
 - id: system.undo

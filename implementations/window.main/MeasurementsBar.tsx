@@ -1,6 +1,7 @@
 // @archigraph panel.measurements
 import React, { useRef, useCallback, useEffect } from 'react';
 import { useApp } from './AppContext';
+import { unitLabel } from '../../src/core/units';
 
 export function MeasurementsBar() {
   const { vcbLabel, vcbValue, statusText, units, activeToolId, handleVCBInput, dirty, documentName } = useApp();
@@ -52,11 +53,10 @@ export function MeasurementsBar() {
           ref={inputRef}
           className="vcb-input"
           type="text"
-          placeholder={vcbValue || '0'}
+          placeholder={vcbValue || `0${unitLabel(units)}`}
           onKeyDown={onKeyDown}
           tabIndex={-1}
         />
-        <span className="vcb-units">{units}</span>
       </div>
 
       <div className="info-section">
@@ -100,7 +100,7 @@ export function MeasurementsBar() {
           white-space: nowrap;
         }
         .vcb-input {
-          width: 100px;
+          width: 180px;
           height: 20px;
           font-family: monospace;
           font-size: var(--font-size-small);

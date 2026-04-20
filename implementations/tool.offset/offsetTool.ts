@@ -60,7 +60,7 @@ export class OffsetTool extends BaseTool {
     if (this.phase !== 'drawing' || !this.selectedFace) return;
     const deltaPixels = this.startScreenY - event.screenY;
     this.currentDistance = deltaPixels * 0.02;
-    this.setVCBValue(this.currentDistance.toFixed(3));
+    this.setVCBValue(this.formatDist(this.currentDistance));
     this.computeOffsetPoints();
   }
 

@@ -4,6 +4,7 @@
 
 import type { Vec3 } from '../../src/core/types';
 import { vec3 } from '../../src/core/math';
+import { formatDistance, getCurrentUnit } from '../../src/core/units';
 import type { IGeometryEngine } from '../../src/core/interfaces';
 import * as THREE from 'three';
 
@@ -165,7 +166,7 @@ class DimensionStoreImpl {
       dim.sprite.position.set(textPos.x, textPos.y, textPos.z);
 
       // Update text on sprite — recreate canvas texture
-      this.updateSpriteText(dim.sprite, dim.distance.toFixed(4));
+      this.updateSpriteText(dim.sprite, formatDistance(dim.distance, getCurrentUnit()));
 
       updates.push({
         dim, dimStart, dimEnd,

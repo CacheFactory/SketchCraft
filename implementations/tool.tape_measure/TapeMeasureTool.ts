@@ -56,7 +56,7 @@ export class TapeMeasureTool extends BaseTool {
 
     if (this.phase === 'drawing' && this.startPoint) {
       const dist = vec3.distance(this.startPoint, point);
-      this.setVCBValue(dist.toFixed(4));
+      this.setVCBValue(this.formatDist(dist));
     }
   }
 
@@ -120,8 +120,8 @@ export class TapeMeasureTool extends BaseTool {
     this.findOrCreateVertex(endPoint);
 
     // Display distance in VCB and status bar
-    this.setVCBValue(dist.toFixed(4));
-    this.setStatus(`Distance: ${dist.toFixed(4)}`);
+    this.setVCBValue(this.formatDist(dist));
+    this.setStatus(`Distance: ${this.formatDist(dist)}`);
 
     // Create a construction guide line between the two points
     if (this.createGuides) {

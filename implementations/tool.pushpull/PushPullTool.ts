@@ -88,8 +88,8 @@ export class PushPullTool extends BaseTool {
     // Scale: 1 pixel ~= 0.05 world units (adjustable feel).
     const deltaPixels = this.startScreenY - event.screenY; // up = positive
     this.currentDistance = deltaPixels * 0.05;
-    this.setVCBValue(this.currentDistance.toFixed(3));
-    this.setStatus(`Distance: ${this.currentDistance.toFixed(3)} m. Click to commit.`);
+    this.setVCBValue(this.formatDist(this.currentDistance));
+    this.setStatus(`Distance: ${this.formatDist(this.currentDistance)}. Click to commit.`);
   }
 
   onKeyDown(event: ToolKeyEvent): void {
@@ -157,7 +157,7 @@ export class PushPullTool extends BaseTool {
   private setViewportCursor(isPointer: boolean): void {
     const container = document.querySelector('.viewport-container') as HTMLElement;
     if (container) {
-      container.style.cursor = isPointer ? 'pointer' : this.cursor;
+      container.style.cursor = isPointer ? 'ns-resize' : 'crosshair';
     }
   }
 

@@ -8,6 +8,7 @@ import type {
   IModelDocument, IViewport, IInferenceEngine,
 } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
+import { toInternal, toDisplay, formatDistance, getCurrentUnit } from '../../src/core/units';
 import { customAxes } from '../tool.axes/CustomAxes';
 
 /** Named drawing planes that arrow keys cycle through. */
@@ -59,12 +60,17 @@ export abstract class BaseTool implements ITool {
     this.vcbValue = '';
     this.statusText = '';
     this.drawingPlaneAxis = 'ground';
+    const container = document.querySelector('.viewport-container') as HTMLElement;
+    if (container) container.style.cursor = 'crosshair';
   }
 
   deactivate(): void {
     this.phase = 'idle';
     this.vcbValue = '';
     this.statusText = '';
+    // Reset cursor to crosshair (tools may set inline cursor styles)
+    const container = document.querySelector('.viewport-container') as HTMLElement;
+    if (container) container.style.cursor = 'crosshair';
   }
 
   onMouseDown(_event: ToolMouseEvent): void {}
@@ -87,7 +93,7 @@ export abstract class BaseTool implements ITool {
     const isActive = phase === 'active' || phase === 'drawing';
     const isDrawOrMeasure = this.category === 'draw' || this.category === 'measure' || this.category === 'construct';
     return {
-      snap: isActive && isDrawOrMeasure,
+      snap: isDrawOrMeasure,  // Snap always on for draw/measure tools (first point too)
       raycast: isActive,
       edgeRaycast: false,
       liveSyncOnMove: false,
@@ -146,14 +152,24 @@ export abstract class BaseTool implements ITool {
     return this.document.geometry.createVertex(point);
   }
 
-  /** Parse VCB input as a single number. Returns NaN on failure. */
+  /** Parse VCB input as a display-unit number and convert to internal (meters). Returns NaN on failure. */
   protected parseDistance(value: string): number {
-    return parseFloat(value.trim());
+    const v = parseFloat(value.trim());
+    if (isNaN(v)) return NaN;
+    return toInternal(v, getCurrentUnit());
   }
 
-  /** Parse VCB input as comma-separated numbers. */
+  /** Parse VCB input as comma-separated display-unit numbers, converted to internal. */
   protected parseDimensions(value: string): number[] {
-    return value.split(',').map(s => parseFloat(s.trim()));
+    return value.split(',').map(s => {
+      const v = parseFloat(s.trim());
+      return isNaN(v) ? NaN : toInternal(v, getCurrentUnit());
+    });
+  }
+
+  /** Format an internal distance for VCB display in current units. */
+  protected formatDist(internalValue: number): string {
+    return formatDistance(internalValue, getCurrentUnit());
   }
 
   /** Begin an undo transaction. Also snapshots dimension state. */
@@ -240,6 +256,73 @@ export abstract class BaseTool implements ITool {
       this.setStatus(`Drawing plane: ${info.label}${getPlaneLabelSuffix()}. ${this.statusText.replace(/Drawing plane:.*?\. /, '')}`);
     }
     return changed;
+  }
+
+  // ── Axis locking ────────────────────────────────────────────
+
+  /** Current axis lock: 'x' | 'y' | 'z' | null */
+  protected axisLock: 'x' | 'y' | 'z' | null = null;
+
+  /**
+   * Handle arrow keys for axis locking.
+   * Up=Y (green/vertical), Right=X (red), Left=Z (blue), Down=unlock.
+   * Returns true if an arrow key was handled.
+   */
+  protected handleArrowKeyAxisLock(event: ToolKeyEvent): boolean {
+    switch (event.key) {
+      case 'ArrowUp':
+        this.axisLock = this.axisLock === 'y' ? null : 'y';
+        break;
+      case 'ArrowRight':
+        this.axisLock = this.axisLock === 'x' ? null : 'x';
+        break;
+      case 'ArrowLeft':
+        this.axisLock = this.axisLock === 'z' ? null : 'z';
+        break;
+      case 'ArrowDown':
+        this.axisLock = null;
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  /** Get a status string describing the current axis lock state. */
+  protected getAxisLockStatus(): string {
+    if (!this.axisLock) return 'Axis unlocked. Free movement.';
+    const axisNames = { x: 'Red (X)', y: 'Green (Y) — vertical', z: 'Blue (Z)' };
+    return `Locked to ${axisNames[this.axisLock]} axis.`;
+  }
+
+  /**
+   * Apply axis lock: constrain the point to move only along the locked axis
+   * from an anchor point. Respects custom axes orientation.
+   */
+  protected applyAxisLock(point: Vec3, anchor: Vec3): Vec3 {
+    if (!this.axisLock) return point;
+    const axisDir: Vec3 = customAxes.getAxisDirection(this.axisLock);
+    const offset = vec3.sub(point, anchor);
+    const projLen = vec3.dot(offset, axisDir);
+    return vec3.add(anchor, vec3.mul(axisDir, projLen));
+  }
+
+  /**
+   * Project a camera ray onto an axis line from an anchor point.
+   * Returns the closest point on the axis to the ray.
+   */
+  protected projectRayOntoAxis(ray: { origin: Vec3; direction: Vec3 }, anchor: Vec3, axis: 'x' | 'y' | 'z'): Vec3 {
+    const axisDir: Vec3 = customAxes.getAxisDirection(axis);
+    const w = vec3.sub(anchor, ray.origin);
+    const a = vec3.dot(ray.direction, ray.direction);
+    const b = vec3.dot(ray.direction, axisDir);
+    const c = vec3.dot(axisDir, axisDir);
+    const d = vec3.dot(ray.direction, w);
+    const e = vec3.dot(axisDir, w);
+    const denom = a * c - b * b;
+    if (Math.abs(denom) < 1e-10) return anchor;
+    const s = (a * e - b * d) / denom;
+    return vec3.add(anchor, vec3.mul(axisDir, s));
   }
 
   /**

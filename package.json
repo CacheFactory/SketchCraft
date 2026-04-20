@@ -10,7 +10,7 @@
     "build:renderer": "webpack --config webpack.renderer.config.js --mode production",
     "build": "npm run build:main && npm run build:renderer",
     "start": "electron dist/main/main.js",
-    "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "dist:mac": "export $(cat .env.signing | xargs) && npm run build && electron-builder --mac --x64 --arm64",
     "dist:win": "npm run build && electron-builder --win --x64",
     "dist:linux": "npm run build && electron-builder --linux --x64",
     "dist:all": "npm run build && electron-builder --mac --x64 --arm64 --win --x64 --linux --x64",

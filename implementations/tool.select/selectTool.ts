@@ -40,7 +40,7 @@ export class SelectTool extends BaseTool {
   private setCursorPointer(isPointer: boolean): void {
     const container = document.querySelector('.viewport-container') as HTMLElement;
     if (container) {
-      container.style.cursor = isPointer ? 'pointer' : 'default';
+      container.style.cursor = isPointer ? 'pointer' : 'crosshair';
     }
   }
 

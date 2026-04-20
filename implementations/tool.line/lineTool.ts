@@ -20,8 +20,6 @@ export class LineTool extends BaseTool {
   private currentPoint: Vec3 | null = null;
   private lastScreenX = 0;
   private lastScreenY = 0;
-  /** Axis lock: 'x' | 'y' | 'z' | null */
-  private axisLock: 'x' | 'y' | 'z' | null = null;
   /** Whether the current point is parallel-snapped */
   private parallelSnapped = false;
   /** Guide line ID for parallel snap visualization */
@@ -50,7 +48,7 @@ export class LineTool extends BaseTool {
 
     const rawPoint = this.getDrawPoint(event);
     if (!rawPoint) return;
-    let point = this.applyAxisLock(rawPoint);
+    let point = this.points.length > 0 ? this.applyAxisLock(rawPoint, this.points[this.points.length - 1]) : rawPoint;
 
     // Apply parallel snap on click (matches the constraint shown in onMouseMove)
     if (this.phase === 'drawing' && this.points.length > 0 && !this.axisLock) {
@@ -109,7 +107,7 @@ export class LineTool extends BaseTool {
     const rawPoint = this.getDrawPoint(event);
     if (!rawPoint) return;
 
-    let point = this.applyAxisLock(rawPoint);
+    let point = this.points.length > 0 ? this.applyAxisLock(rawPoint, this.points[this.points.length - 1]) : rawPoint;
 
     // Parallel snap: when drawing and no axis lock, check if direction is
     // roughly parallel to any existing edge and constrain if so.
@@ -133,7 +131,7 @@ export class LineTool extends BaseTool {
     if (this.phase === 'drawing' && this.points.length > 0) {
       const lastPoint = this.points[this.points.length - 1];
       const dist = vec3.distance(lastPoint, this.currentPoint);
-      this.setVCBValue(dist.toFixed(3));
+      this.setVCBValue(this.formatDist(dist));
     }
   }
 
@@ -161,24 +159,9 @@ export class LineTool extends BaseTool {
     }
 
     // Arrow keys lock to axis
-    if (event.key === 'ArrowUp') {
-      this.axisLock = this.axisLock === 'y' ? null : 'y';
-    } else if (event.key === 'ArrowRight') {
-      this.axisLock = this.axisLock === 'x' ? null : 'x';
-    } else if (event.key === 'ArrowLeft') {
-      this.axisLock = this.axisLock === 'z' ? null : 'z';
-    } else if (event.key === 'ArrowDown') {
-      this.axisLock = null;
-    } else {
-      return; // Not an arrow key
-    }
+    if (!this.handleArrowKeyAxisLock(event)) return;
 
-    if (this.axisLock) {
-      const axisNames = { x: 'Red (X)', y: 'Green (Y) — vertical', z: 'Blue (Z)' };
-      this.setStatus(`Locked to ${axisNames[this.axisLock]} axis.`);
-    } else {
-      this.setStatus('Axis unlocked. Free movement.');
-    }
+    this.setStatus(this.getAxisLockStatus());
 
     // Immediately recompute currentPoint from stored screen position
     if (this.points.length > 0 && this.lastScreenX > 0) {
@@ -271,48 +254,6 @@ export class LineTool extends BaseTool {
 
   // ── Private ────────────────────────────────────────────
 
-  /**
-   * Apply axis lock: constrain the point to move only along the locked axis
-   * from the last placed point. Respects custom axes orientation.
-   */
-  private applyAxisLock(point: Vec3): Vec3 {
-    if (!this.axisLock || this.points.length === 0) return point;
-    const last = this.points[this.points.length - 1];
-    const { customAxes } = require('../tool.axes/CustomAxes');
-    const axisDir: Vec3 = customAxes.getAxisDirection(this.axisLock);
-
-    // Project the offset onto the locked axis direction
-    const offset = vec3.sub(point, last);
-    const projLen = vec3.dot(offset, axisDir);
-    return vec3.add(last, vec3.mul(axisDir, projLen));
-  }
-
-  /**
-   * Project a camera ray onto an axis line from an anchor point.
-   * Returns the closest point on the axis to the ray.
-   */
-  private projectRayOntoAxis(ray: { origin: Vec3; direction: Vec3 }, anchor: Vec3, axis: 'x' | 'y' | 'z'): Vec3 {
-    const { customAxes } = require('../tool.axes/CustomAxes');
-    const axisDir: Vec3 = customAxes.getAxisDirection(axis);
-
-    // Closest point between two lines: ray and axis line through anchor
-    const w = vec3.sub(anchor, ray.origin);
-    const a = vec3.dot(ray.direction, ray.direction);
-    const b = vec3.dot(ray.direction, axisDir);
-    const c = vec3.dot(axisDir, axisDir);
-    const d = vec3.dot(ray.direction, w);
-    const e = vec3.dot(axisDir, w);
-
-    const denom = a * c - b * b;
-    if (Math.abs(denom) < 1e-10) return anchor; // Parallel
-
-    const t = (b * e - c * d) / denom;
-    // s gives us the parameter on the axis line
-    const s = (a * e - b * d) / denom;
-
-    return vec3.add(anchor, vec3.mul(axisDir, s));
-  }
-
   private getDrawPoint(event: ToolMouseEvent): Vec3 | null {
     const anchor = this.points.length > 0 ? this.points[this.points.length - 1] : undefined;
 
@@ -350,7 +291,7 @@ export class LineTool extends BaseTool {
     if (this.points.length >= 2) {
       const a = this.points[this.points.length - 2];
       const b = this.points[this.points.length - 1];
-      this.setVCBValue(vec3.distance(a, b).toFixed(3));
+      this.setVCBValue(this.formatDist(vec3.distance(a, b)));
     }
   }
 

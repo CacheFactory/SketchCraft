@@ -69,7 +69,7 @@ export class RectangleTool extends BaseTool {
     if (point) {
       this.currentCorner = point;
       const dims = this.computeDimensions();
-      this.setVCBValue(`${dims.w.toFixed(3)}, ${dims.h.toFixed(3)}`);
+      this.setVCBValue(`${this.formatDist(dims.w)}, ${this.formatDist(dims.h)}`);
     }
   }
 
@@ -160,7 +160,7 @@ export class RectangleTool extends BaseTool {
     if (point) {
       this.currentCorner = point;
       const dims = this.computeDimensions();
-      this.setVCBValue(`${dims.w.toFixed(3)}, ${dims.h.toFixed(3)}`);
+      this.setVCBValue(`${this.formatDist(dims.w)}, ${this.formatDist(dims.h)}`);
     }
   }
 

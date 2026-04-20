@@ -1,5 +1,6 @@
 // @archigraph tool.arc
-// Arc tool: click start, click end, move to set bulge. Arrow keys change plane.
+// Arc tool: click start, click end, move to set bulge.
+// Arrow keys lock to axis during point placement, change plane during bulge.
 
 import type { Vec3, Plane } from '../../src/core/types';
 import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
@@ -28,7 +29,7 @@ export class ArcTool extends BaseTool {
   activate(): void {
     super.activate();
     this.reset();
-    this.setStatus('Click to place start point. Arrow keys change plane.');
+    this.setStatus('Click to place start point. Arrow keys lock to axis.');
   }
 
   deactivate(): void {
@@ -43,22 +44,28 @@ export class ArcTool extends BaseTool {
     this.lastScreenY = event.screenY;
 
     if (this.step === 0) {
-      // Prefer snapped point for start (connects to existing geometry)
       const point = event.worldPoint ?? this.screenToDrawingPlane(event);
       if (!point) return;
       this.startPoint = point;
       this.beginTransaction('Draw Arc');
       this.drawPlane = this.getDrawingPlane(this.startPoint);
       this.step = 1;
+      this.axisLock = null;
       this.setPhase('drawing');
-      this.setStatus('Click to place end point. Arrow keys change plane.');
+      this.setStatus('Click to place end point. Arrow keys lock to axis.');
     } else if (this.step === 1) {
-      // Prefer snapped point for end (connects to existing geometry)
-      const point = event.worldPoint ?? this.screenToDrawingPlane(event, this.startPoint ?? undefined);
+      let point = event.worldPoint ?? this.screenToDrawingPlane(event, this.startPoint ?? undefined);
       if (!point) return;
+      // Apply axis lock relative to start point
+      if (this.axisLock && this.startPoint) {
+        point = this.applyAxisLock(point, this.startPoint);
+      }
       this.endPoint = point;
+      // Compute draw plane that works for the actual chord direction
+      this.drawPlane = this.computeArcPlane(this.startPoint!, point);
       this.step = 2;
-      this.setStatus('Move to set arc bulge, then click.');
+      this.axisLock = null;
+      this.setStatus('Move to set arc bulge, then click. Arrow keys change plane.');
     } else if (this.step === 2) {
       this.createArc();
     }
@@ -80,14 +87,21 @@ export class ArcTool extends BaseTool {
       const perpDir = vec3.normalize(vec3.cross(chord, this.drawPlane.normal));
       const toPoint = vec3.sub(point, mid);
       this.currentBulge = vec3.dot(toPoint, perpDir);
-      this.setVCBValue(Math.abs(this.currentBulge).toFixed(3));
+      this.setVCBValue(this.formatDist(Math.abs(this.currentBulge)));
       this.computePreviewPoints();
     } else if (this.step === 1 && this.startPoint) {
-      const point = this.screenToDrawingPlane(event, this.startPoint ?? undefined) ?? this.resolvePoint(event);
-      if (point) {
-        this.endPoint = point; // Tentative end for preview
-        this.setVCBValue(vec3.distance(this.startPoint, point).toFixed(3));
+      let point = this.screenToDrawingPlane(event, this.startPoint ?? undefined) ?? this.resolvePoint(event);
+      if (!point) return;
+      // Apply axis lock for end point placement
+      if (this.axisLock) {
+        const ray = this.viewport.camera.screenToRay(
+          event.screenX, event.screenY,
+          this.viewport.getWidth(), this.viewport.getHeight(),
+        );
+        point = this.projectRayOntoAxis(ray, this.startPoint, this.axisLock);
       }
+      this.endPoint = point; // Tentative end for preview
+      this.setVCBValue(this.formatDist(vec3.distance(this.startPoint, point)));
     }
   }
 
@@ -95,13 +109,39 @@ export class ArcTool extends BaseTool {
     if (event.key === 'Escape') {
       if (this.step > 0) this.abortTransaction();
       this.reset();
-      this.setStatus('Click to place start point. Arrow keys change plane.');
+      this.setStatus('Click to place start point. Arrow keys lock to axis.');
       return;
     }
-    if (this.handleArrowKeyPlane(event)) {
-      if (this.startPoint) this.drawPlane = this.getDrawingPlane(this.startPoint);
-      const info = DRAWING_PLANES[this.drawingPlaneAxis];
-      this.setStatus(`Plane: ${info.label}. ${this.step === 0 ? 'Click start.' : this.step === 1 ? 'Click end.' : 'Set bulge.'}`);
+
+    if (this.step === 0 || this.step === 1) {
+      // During point placement: arrow keys lock to axis
+      if (this.handleArrowKeyAxisLock(event)) {
+        this.setStatus(this.getAxisLockStatus());
+        // Recompute preview from stored screen position
+        if (this.step === 1 && this.startPoint && this.lastScreenX > 0) {
+          const ray = this.viewport.camera.screenToRay(
+            this.lastScreenX, this.lastScreenY,
+            this.viewport.getWidth(), this.viewport.getHeight(),
+          );
+          if (this.axisLock) {
+            this.endPoint = this.projectRayOntoAxis(ray, this.startPoint, this.axisLock);
+          } else {
+            // Unlock — project onto drawing plane
+            const planePoint = this.screenToDrawingPlane(
+              { screenX: this.lastScreenX, screenY: this.lastScreenY } as ToolMouseEvent,
+              this.startPoint,
+            );
+            if (planePoint) this.endPoint = planePoint;
+          }
+        }
+      }
+    } else if (this.step === 2) {
+      // During bulge: arrow keys change drawing plane
+      if (this.handleArrowKeyPlane(event)) {
+        if (this.startPoint) this.drawPlane = this.getDrawingPlane(this.startPoint);
+        const info = DRAWING_PLANES[this.drawingPlaneAxis];
+        this.setStatus(`Plane: ${info.label}. Set bulge.`);
+      }
     }
   }
 
@@ -127,7 +167,21 @@ export class ArcTool extends BaseTool {
 
   getPreview(): ToolPreview | null {
     if (this.step === 1 && this.startPoint && this.endPoint) {
-      return { lines: [{ from: this.startPoint, to: this.endPoint }] };
+      const lines: { from: Vec3; to: Vec3 }[] = [{ from: this.startPoint, to: this.endPoint }];
+      // When axis-locked, also show a small arc hint so user sees the plane
+      if (this.axisLock) {
+        const plane = this.computeArcPlane(this.startPoint, this.endPoint);
+        const chord = vec3.sub(this.endPoint, this.startPoint);
+        const chordLen = vec3.length(chord);
+        if (chordLen > 1e-10) {
+          const perpDir = vec3.normalize(vec3.cross(chord, plane.normal));
+          const mid = vec3.lerp(this.startPoint, this.endPoint, 0.5);
+          // Show a small perpendicular indicator at the midpoint
+          const hintLen = chordLen * 0.15;
+          lines.push({ from: mid, to: vec3.add(mid, vec3.mul(perpDir, hintLen)) });
+        }
+      }
+      return { lines };
     }
     if (this.step === 2 && this.arcPoints.length > 1) {
       return { polygon: this.arcPoints }; // Not closed, but renders as a polyline
@@ -141,8 +195,51 @@ export class ArcTool extends BaseTool {
     this.currentBulge = 0;
     this.step = 0;
     this.arcPoints = [];
+    this.axisLock = null;
     this.setPhase('idle');
     this.setVCBValue('');
+  }
+
+  /**
+   * Compute an arc plane whose normal is NOT parallel to the chord.
+   * If the current drawing plane works, use it. Otherwise pick a plane
+   * that contains the chord and provides a valid perpendicular direction.
+   */
+  private computeArcPlane(start: Vec3, end: Vec3): Plane {
+    const chord = vec3.sub(end, start);
+    const chordLen = vec3.length(chord);
+    if (chordLen < 1e-10) return this.getDrawingPlane(start);
+
+    const chordDir = vec3.normalize(chord);
+
+    // Try the current drawing plane first
+    const currentNormal = this.getDrawingPlane(start).normal;
+    const dot = Math.abs(vec3.dot(chordDir, currentNormal));
+    if (dot < 0.95) {
+      // Current plane normal is not parallel to chord — it works
+      return this.getDrawingPlane(start);
+    }
+
+    // Chord is roughly parallel to the plane normal — pick a better plane.
+    // Try standard axes and pick the one most perpendicular to the chord.
+    const candidates: Vec3[] = [
+      { x: 0, y: 1, z: 0 }, // ground/green
+      { x: 1, y: 0, z: 0 }, // red
+      { x: 0, y: 0, z: 1 }, // blue
+    ];
+
+    let bestNormal = candidates[0];
+    let bestDot = 1;
+    for (const n of candidates) {
+      const d = Math.abs(vec3.dot(chordDir, n));
+      if (d < bestDot) {
+        bestDot = d;
+        bestNormal = n;
+      }
+    }
+
+    const distance = vec3.dot(start, bestNormal);
+    return { normal: { ...bestNormal }, distance };
   }
 
   private computePreviewPoints(): void {

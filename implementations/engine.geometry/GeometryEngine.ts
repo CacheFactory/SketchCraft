@@ -423,13 +423,11 @@ export class GeometryEngine implements IGeometryEngine {
       }
       if (exists) continue;
 
-      // MINIMAL LOOP CHECK: skip this loop if any two non-adjacent vertices
-      // have an edge between them (a "chord"). If a chord exists, this loop
-      // contains smaller sub-loops and is not a minimal face.
+      // MINIMAL LOOP CHECK 1: skip if any two non-adjacent loop vertices
+      // have an edge between them (a "chord").
       let hasChord = false;
       for (let i = 0; i < loop.length && !hasChord; i++) {
         for (let j = i + 2; j < loop.length; j++) {
-          // Skip adjacent pair (last and first are also adjacent)
           if (i === 0 && j === loop.length - 1) continue;
           if (this.mesh.findEdgeBetween(loop[i], loop[j])) {
             hasChord = true;
@@ -438,6 +436,11 @@ export class GeometryEngine implements IGeometryEngine {
         }
       }
       if (hasChord) continue;
+
+      // MINIMAL LOOP CHECK 2: skip if any coplanar vertex with edges lies
+      // geometrically inside the loop polygon. Such a vertex means the loop
+      // encloses smaller faces and is not minimal.
+      if (this.loopContainsInteriorVertex(loop)) continue;
 
       try {
         this.createFace(loop);
@@ -448,6 +451,71 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   /**
+   * Check if a candidate face loop contains any vertex in its interior.
+   * Projects the loop and all coplanar vertices onto the loop's 2D plane,
+   * then uses a ray-casting point-in-polygon test.
+   */
+  private loopContainsInteriorVertex(loop: string[]): boolean {
+    if (loop.length < 3) return false;
+
+    const positions = loop.map(id => {
+      const v = this.mesh.vertices.get(id);
+      return v ? v.position : null;
+    });
+    if (positions.some(p => !p)) return false;
+    const pos = positions as Vec3[];
+
+    // Compute loop plane normal
+    const v01 = vec3.sub(pos[1], pos[0]);
+    const v02 = vec3.sub(pos[2], pos[0]);
+    const normal = vec3.normalize(vec3.cross(v01, v02));
+    if (vec3.length(normal) < 1e-8) return false;
+    const planeDist = vec3.dot(normal, pos[0]);
+
+    // Build 2D projection axes on the plane
+    let axisU = vec3.normalize(v01);
+    let axisV = vec3.normalize(vec3.cross(normal, axisU));
+
+    // Project loop vertices to 2D
+    const loopSet = new Set(loop);
+    const poly2D = pos.map(p => ({
+      u: vec3.dot(vec3.sub(p, pos[0]), axisU),
+      v: vec3.dot(vec3.sub(p, pos[0]), axisV),
+    }));
+
+    // Check all mesh vertices not in the loop
+    for (const [vid, vert] of this.mesh.vertices) {
+      if (loopSet.has(vid)) continue;
+
+      // Must be coplanar
+      const distToPlane = Math.abs(vec3.dot(normal, vert.position) - planeDist);
+      if (distToPlane > 0.05) continue;
+
+      // Must have at least one edge (isolated vertices don't matter)
+      const vertEdges = this.mesh.getVertexEdges(vid);
+      if (vertEdges.length === 0) continue;
+
+      // Project to 2D and do point-in-polygon test (ray casting)
+      const pu = vec3.dot(vec3.sub(vert.position, pos[0]), axisU);
+      const pv = vec3.dot(vec3.sub(vert.position, pos[0]), axisV);
+
+      let inside = false;
+      for (let i = 0, j = poly2D.length - 1; i < poly2D.length; j = i++) {
+        const ui = poly2D[i].u, vi = poly2D[i].v;
+        const uj = poly2D[j].u, vj = poly2D[j].v;
+        if (((vi > pv) !== (vj > pv)) &&
+            (pu < (uj - ui) * (pv - vi) / (vj - vi) + ui)) {
+          inside = !inside;
+        }
+      }
+
+      if (inside) return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Split any face that is bisected by a path of vertices (e.g., an arc from A to B).
    * If the first and last vertex of the path are both on a face boundary,
    * that face is split into two: one side includes the path, the other side
@@ -455,9 +523,6 @@ export class GeometryEngine implements IGeometryEngine {
    */
   splitFaceWithPath(pathVertexIds: string[]): void {
     if (pathVertexIds.length < 2) return;
-    const startId = pathVertexIds[0];
-    const endId = pathVertexIds[pathVertexIds.length - 1];
-    const pathInterior = pathVertexIds.slice(1, -1);
 
     // Collect face IDs first to avoid mutating the map during iteration
     const faceIds = [...this.mesh.faces.keys()];
@@ -468,9 +533,9 @@ export class GeometryEngine implements IGeometryEngine {
 
       let verts = [...face.vertexIds];
 
-      // For each path endpoint, if it's not in the vertex list,
+      // For each path vertex, if it's not in the vertex list,
       // check if it lies ON one of the face's edges and insert it
-      for (const checkId of [startId, endId]) {
+      for (const checkId of pathVertexIds) {
         if (verts.includes(checkId)) continue;
 
         const checkVert = this.mesh.vertices.get(checkId);
@@ -495,11 +560,14 @@ export class GeometryEngine implements IGeometryEngine {
           if (vec3.distance(closest, checkVert.position) < 0.05) {
             verts.splice(i + 1, 0, checkId);
 
-            const existingEdge = this.mesh.findEdgeBetween(verts[i], verts[i + 2]);
+            // The original edge was between verts[i] and the vertex now at i+2
+            // Use modular indexing to handle the wrapping edge case
+            const nextAfterInsert = (i + 2) % verts.length;
+            const existingEdge = this.mesh.findEdgeBetween(verts[i], verts[nextAfterInsert]);
             if (existingEdge) {
               this.mesh.removeEdge(existingEdge.id);
               this.mesh.addEdge(verts[i], checkId);
-              this.mesh.addEdge(checkId, verts[i + 2]);
+              this.mesh.addEdge(checkId, verts[nextAfterInsert]);
             }
             inserted = true;
           }
@@ -508,9 +576,31 @@ export class GeometryEngine implements IGeometryEngine {
 
       face.vertexIds = verts;
 
-      if (!verts.includes(startId) || !verts.includes(endId)) continue;
+      // Find the first and last path vertices that are on this face's boundary.
+      // The line may extend beyond the face, so the chain endpoints may not be
+      // on the boundary — we need to find the actual entry/exit points.
+      let splitStart: string | null = null;
+      let splitEnd: string | null = null;
+      let splitStartIdx = -1;
+      let splitEndIdx = -1;
 
-      this.splitFaceAtBoundary(faceId, startId, endId, pathInterior);
+      for (let i = 0; i < pathVertexIds.length; i++) {
+        if (verts.includes(pathVertexIds[i])) {
+          if (splitStart === null) {
+            splitStart = pathVertexIds[i];
+            splitStartIdx = i;
+          }
+          splitEnd = pathVertexIds[i];
+          splitEndIdx = i;
+        }
+      }
+
+      if (!splitStart || !splitEnd || splitStart === splitEnd) continue;
+
+      // Extract the interior path vertices between splitStart and splitEnd
+      const pathInterior = pathVertexIds.slice(splitStartIdx + 1, splitEndIdx);
+
+      this.splitFaceAtBoundary(faceId, splitStart, splitEnd, pathInterior);
       // Don't return — continue checking other faces
     }
   }

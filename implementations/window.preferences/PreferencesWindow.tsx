@@ -5,11 +5,12 @@ import { UserPreferences, DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 interface PreferencesWindowProps {
   visible: boolean;
   onClose: () => void;
+  onUnitsChanged?: (units: UserPreferences['units']) => void;
 }
 
 type TabId = 'units' | 'rendering' | 'shortcuts' | 'workflow' | 'ai' | 'plugins';
 
-export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) {
+export function PreferencesWindow({ visible, onClose, onUnitsChanged }: PreferencesWindowProps) {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [activeTab, setActiveTab] = useState<TabId>('units');
   const [modified, setModified] = useState(false);
@@ -29,9 +30,10 @@ export function PreferencesWindow({ visible, onClose }: PreferencesWindowProps) 
     if (typeof window.api !== 'undefined') {
       await window.api.invoke('prefs:set', prefs);
     }
+    onUnitsChanged?.(prefs.units);
     setModified(false);
     onClose();
-  }, [prefs, onClose]);
+  }, [prefs, onClose, onUnitsChanged]);
 
   if (!visible) return null;
 

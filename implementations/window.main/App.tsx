@@ -167,7 +167,7 @@ function AppLayout() {
       <ContextMenu />
       <LoadingOverlay />
       <AIChatPanel />
-      <PreferencesWindow visible={prefsVisible} onClose={() => setPrefsVisible(false)} />
+      <PreferencesWindow visible={prefsVisible} onClose={() => setPrefsVisible(false)} onUnitsChanged={(u) => updateState({ units: u })} />
 
       <style>{`
         .app-layout {

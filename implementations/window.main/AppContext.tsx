@@ -3,6 +3,7 @@ import React, { createContext, useContext, useRef, useState, useCallback, useEff
 import { RenderMode, SelectionMode, LengthUnit } from '../../src/core/types';
 import type { IApplication, ITool } from '../../src/core/interfaces';
 import type { UserPreferences } from '../../src/core/ipc-types';
+import { setCurrentUnit } from '../../src/core/units';
 
 interface AppState {
   activeTool: ITool | null;
@@ -93,8 +94,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAppInstance(app); // Trigger re-render so consumers get the app
   }, []);
 
+  // Load user preferences on mount (sync units)
+  useEffect(() => {
+    if ((window as any).api?.invoke) {
+      (window as any).api.invoke('prefs:get').then((prefs: UserPreferences) => {
+        if (prefs?.units) {
+          setCurrentUnit(prefs.units);
+          setState(prev => ({ ...prev, units: prefs.units }));
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
   const updateState = useCallback((partial: Partial<AppState>) => {
-    setState(prev => ({ ...prev, ...partial }));
+    setState(prev => {
+      // When units change, also update the global singleton
+      if (partial.units) setCurrentUnit(partial.units);
+      return { ...prev, ...partial };
+    });
   }, []);
 
   const activateTool = useCallback((toolId: string) => {
