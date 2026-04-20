@@ -125,7 +125,7 @@ CF_DOMAIN=$(aws cloudfront get-distribution \
 
 echo ""
 echo "==> Deploy complete!"
-echo "    S3:         https://${BUCKET}.s3.${REGION}.amazonaws.com/index.html"
-echo "    CloudFront: https://${CF_DOMAIN}"
+echo "    https://draftdownapp.com"
 echo ""
-echo "    Note: CloudFront may take 5-10 minutes to deploy on first creation."
+echo "    CloudFront: https://${CF_DOMAIN}"
+echo "    S3:         s3://${BUCKET}"
