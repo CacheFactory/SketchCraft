@@ -4,7 +4,7 @@ import { useApp } from '../window.main/AppContext';
 import { Application } from '../process.renderer/Application';
 import { TextInputDialog, TextInputResult } from '../window.main/TextInputDialog';
 import { TextTool, TextPlacementRequest } from '../tool.text/textTool';
-import type { ToolMouseEvent } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolEventNeeds } from '../../src/core/interfaces';
 import type { Vec3 } from '../../src/core/types';
 
 interface TextDialogState {
@@ -141,9 +141,9 @@ export function ViewportCanvas() {
     return { hitEntityId: null, hitPoint: null };
   }, []);
 
-  /** Full tool event with raycast + snap (used for clicks and draw/modify tools). */
-  const getToolEvent = useCallback((e: React.MouseEvent): ToolMouseEvent | null => {
-    const t0 = performance.now();
+  /** Unified tool event builder. GPU pick always runs; raycast, edge raycast,
+   *  and snap are additive based on tool-declared needs. */
+  const buildToolEvent = useCallback((e: React.MouseEvent, needs: ToolEventNeeds): ToolMouseEvent | null => {
     const app = appInstanceRef.current;
     if (!app?.viewport) return null;
     const container = containerRef.current;
@@ -154,107 +154,32 @@ export function ViewportCanvas() {
     const screenY = e.clientY - rect.top;
     let worldPoint = app.viewport.screenToWorld(screenX, screenY);
 
-    // Skip full raycast and snap in batched mode (view-only, no per-entity objects)
     const renderer = app.viewport.renderer as any;
     const hasPicking = renderer.hasEntityObjects ? renderer.hasEntityObjects() : false;
 
-    let hitEntityId: string | null = null;
-    let hitPoint: Vec3 | null = null;
-
-    if (hasPicking) {
-      const hits = app.viewport.raycastScene(screenX, screenY);
-      const dt = performance.now() - t0;
-      if (dt > 10) console.warn(`[getToolEvent] raycast took ${dt.toFixed(1)}ms`);
-      const sm = app.document.scene as any;
-      const resolved = resolveHit(hits, sm);
-      hitEntityId = resolved.hitEntityId;
-      hitPoint = resolved.hitPoint;
-
-      // Snap detection for drawing/modify tools
-      const activeTool = app.toolManager.getActiveTool();
-      const noSnapTools = new Set(['tool.select', 'tool.paint', 'tool.eraser']);
-      const snapCategories = new Set(['draw', 'measure', 'construct', 'modify']);
-      const isSnapTool = activeTool
-        ? snapCategories.has(activeTool.category) && !noSnapTools.has(activeTool.id)
-        : false;
-
-      if (isSnapTool && app.sceneBridge) {
-        const snapped = app.sceneBridge.findSnapPoint(
-          screenX, screenY, worldPoint,
-          app.viewport.getWidth(), app.viewport.getHeight(),
-          app.viewport.camera, 15,
-        );
-        if (snapped) worldPoint = snapped;
-      } else if (app.sceneBridge) {
-        app.sceneBridge.hideSnapMarker();
-      }
-    }
-
-    return {
-      screenX, screenY, worldPoint,
-      inference: null,
-      hitEntityId, hitPoint,
-      button: e.button,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey || e.metaKey,
-      altKey: e.altKey,
-    };
-  }, [resolveHit]);
-
-  /** GPU-pick only tool event — O(1), used for hover on select/paint/eraser. */
-  const getToolEventGpuOnly = useCallback((e: React.MouseEvent): ToolMouseEvent | null => {
-    const app = appInstanceRef.current;
-    if (!app?.viewport) return null;
-    const container = containerRef.current;
-    if (!container) return null;
-
-    const rect = container.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const worldPoint = app.viewport.screenToWorld(screenX, screenY);
-
-    // GPU pick: O(1) pixel read, no scene traversal
-    const renderer = app.viewport.renderer as any;
-    let hitEntityId: string | null = null;
-    if (renderer.gpuPick) {
-      hitEntityId = renderer.gpuPick(screenX, screenY);
-    }
-
-    return {
-      screenX, screenY, worldPoint,
-      inference: null,
-      hitEntityId, hitPoint: worldPoint,
-      button: e.button,
-      shiftKey: e.shiftKey,
-      ctrlKey: e.ctrlKey || e.metaKey,
-      altKey: e.altKey,
-    };
-  }, []);
-
-  /** GPU pick + optional edge-only raycast fallback — used for clicks on select/paint/eraser.
-   *  Skips raycast in batched mode (no per-entity objects = view-only). */
-  const getToolEventLight = useCallback((e: React.MouseEvent): ToolMouseEvent | null => {
-    const app = appInstanceRef.current;
-    if (!app?.viewport) return null;
-    const container = containerRef.current;
-    if (!container) return null;
-
-    const rect = container.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const worldPoint = app.viewport.screenToWorld(screenX, screenY);
-
-    // GPU pick for faces: O(1)
-    const renderer = app.viewport.renderer as any;
+    // GPU pick always runs (O(1) pixel read)
     let hitEntityId: string | null = null;
     let hitPoint: Vec3 | null = worldPoint;
     if (renderer.gpuPick) {
       hitEntityId = renderer.gpuPick(screenX, screenY);
     }
 
-    // Only attempt edge raycast if there are per-entity objects registered.
-    // In batched mode (large models), there are none — selection is disabled.
-    if (!hitEntityId && renderer.hasEntityObjects && renderer.hasEntityObjects()) {
+    // Full raycast (additive: refines hitPoint, may find edges/vertices GPU pick misses)
+    if (needs.raycast && hasPicking) {
+      const t0 = performance.now();
+      const hits = app.viewport.raycastScene(screenX, screenY);
+      const dt = performance.now() - t0;
+      if (dt > 10) console.warn(`[buildToolEvent] raycast took ${dt.toFixed(1)}ms`);
+      const sm = app.document.scene as any;
+      const resolved = resolveHit(hits, sm);
+      if (resolved.hitEntityId) {
+        hitEntityId = resolved.hitEntityId;
+        hitPoint = resolved.hitPoint;
+      }
+    }
+
+    // Edge-only raycast fallback (for select/paint/eraser when GPU pick missed)
+    if (needs.edgeRaycast && !hitEntityId && hasPicking) {
       const vp = app.viewport as any;
       if (vp.raycastEdgesOnly) {
         const edgeHits = vp.raycastEdgesOnly(screenX, screenY);
@@ -265,6 +190,18 @@ export function ViewportCanvas() {
           hitPoint = resolved.hitPoint;
         }
       }
+    }
+
+    // Snap detection
+    if (needs.snap && app.sceneBridge) {
+      const snapped = app.sceneBridge.findSnapPoint(
+        screenX, screenY, worldPoint,
+        app.viewport.getWidth(), app.viewport.getHeight(),
+        app.viewport.camera, 15,
+      );
+      if (snapped) worldPoint = snapped;
+    } else if (app.sceneBridge) {
+      app.sceneBridge.hideSnapMarker();
     }
 
     return {
@@ -318,16 +255,15 @@ export function ViewportCanvas() {
     const tool = app?.toolManager.getActiveTool();
     if (!tool) return;
 
-    // Use lightweight path for select/paint/eraser (GPU pick + edge raycast on click only)
-    const lightToolIds = ['tool.select', 'tool.paint', 'tool.eraser'];
-    const isLightTool = lightToolIds.indexOf(tool.id) >= 0;
-    const ev = isLightTool ? getToolEventLight(e) : getToolEvent(e);
+    const needs = tool.getEventNeeds((tool as any).phase ?? 'idle');
+    const ev = buildToolEvent(e, needs);
     if (!ev) return;
 
     tool.onMouseDown(ev);
 
-    // Skip expensive syncScene for tools that don't modify geometry
-    if (isLightTool) {
+    if (needs.mutatesOnClick) {
+      syncAfterAction();
+    } else {
       syncSelectionToUI();
       syncPreviews();
       updateState({
@@ -335,10 +271,8 @@ export function ViewportCanvas() {
         vcbValue: tool.getVCBValue(),
         statusText: tool.getStatusText(),
       });
-    } else {
-      syncAfterAction();
     }
-  }, [getToolEvent, getToolEventLight, syncAfterAction, syncSelectionToUI, syncPreviews, updateState]);
+  }, [buildToolEvent, syncAfterAction, syncSelectionToUI, syncPreviews, updateState]);
 
   // Throttle mouse move for tool events to avoid overwhelming raycasting/snapping
   const lastMoveTimeRef = useRef(0);
@@ -378,24 +312,16 @@ export function ViewportCanvas() {
     const tool = app?.toolManager.getActiveTool();
     if (!tool) return;
 
-    // Determine whether this tool needs full raycast+snap on mouse move.
-    // Only tools actively drawing/modifying geometry need it (e.g. line tool in 'drawing' phase).
-    // Everything else uses GPU pick only to avoid 100ms+ raycasts on large models.
-    const toolPhase = (tool as any).phase;
-    const needsFullRaycast = toolPhase === 'active' || toolPhase === 'drawing';
-    const ev = needsFullRaycast ? getToolEvent(e) : getToolEventGpuOnly(e);
+    const needs = tool.getEventNeeds((tool as any).phase ?? 'idle');
+    const ev = buildToolEvent(e, needs);
     if (!ev) return;
 
     tool.onMouseMove(ev);
 
-    // Sync scene on every mouse move for modify tools that move geometry
-    // in active phase (Move/Rotate/Scale/Offset/PushPull).
-    const geometryModifyTools = ['tool.move', 'tool.rotate', 'tool.scale', 'tool.offset', 'tool.pushpull'];
-    if (app && geometryModifyTools.indexOf(tool.id) >= 0 && (tool as any).phase === 'active') {
+    if (needs.liveSyncOnMove && app) {
       app.syncScene();
     }
 
-    // Render live tool preview (rubber-band lines, rectangle outlines, etc.)
     syncPreviews();
 
     // Update drag box overlay for Select tool
@@ -408,15 +334,13 @@ export function ViewportCanvas() {
       }
     }
 
-    // Sync pre-selection highlight on hover (for Select tool)
     syncSelectionToUI();
 
-    // Update status/VCB
     updateState({
       vcbValue: tool.getVCBValue(),
       statusText: tool.getStatusText(),
     });
-  }, [getToolEvent, getToolEventGpuOnly, syncSelectionToUI, syncPreviews, updateState]);
+  }, [buildToolEvent, syncSelectionToUI, syncPreviews, updateState]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     // Middle mouse release
@@ -429,21 +353,20 @@ export function ViewportCanvas() {
     const tool = app?.toolManager.getActiveTool();
     if (!tool) return;
 
-    const lightToolIds = ['tool.select', 'tool.paint', 'tool.eraser'];
-    const isLightTool = lightToolIds.indexOf(tool.id) >= 0;
-    const ev = isLightTool ? getToolEventLight(e) : getToolEvent(e);
+    const needs = tool.getEventNeeds((tool as any).phase ?? 'idle');
+    const ev = buildToolEvent(e, needs);
     if (!ev) return;
 
     tool.onMouseUp(ev);
     setDragBox(null);
 
-    if (isLightTool) {
+    if (needs.mutatesOnClick) {
+      syncAfterAction();
+    } else {
       syncSelectionToUI();
       syncPreviews();
-    } else {
-      syncAfterAction();
     }
-  }, [getToolEvent, getToolEventLight, syncAfterAction, syncSelectionToUI, syncPreviews]);
+  }, [buildToolEvent, syncAfterAction, syncSelectionToUI, syncPreviews]);
 
   // Wheel zoom is handled via native event listener (see useEffect above)
   // to allow preventDefault on non-passive listener.

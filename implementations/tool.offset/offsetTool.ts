@@ -2,7 +2,7 @@
 // Offset tool: click on face, drag to create inset/outset copy of edges with live preview.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
@@ -81,6 +81,11 @@ export class OffsetTool extends BaseTool {
   }
 
   getVCBLabel(): string { return this.phase === 'drawing' ? 'Distance' : ''; }
+
+  getEventNeeds(): ToolEventNeeds {
+    const isActive = this.phase === 'active' || this.phase === 'drawing';
+    return { snap: isActive, raycast: isActive, edgeRaycast: false, liveSyncOnMove: isActive, mutatesOnClick: true };
+  }
 
   getPreview(): ToolPreview | null {
     if (this.phase !== 'drawing' || this.offsetPoints.length < 3) return null;

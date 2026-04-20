@@ -37,8 +37,9 @@ export class SceneBridge {
   private snapMarkerDot: THREE.Mesh;
   private snapActive = false;
 
-  // Dirty tracking: cache vertex position hashes to skip unchanged faces/edges
+  // Dirty tracking: vertex position hashes for edges, generation counter for faces
   private lastVertexPositions = new Map<string, string>();
+  private lastFaceGeneration = new Map<string, number>();
 
   // Batched mode: large model imported as single merged mesh.
   // sync() will only process NEW geometry added after the batch.
@@ -469,25 +470,31 @@ export class SceneBridge {
       }
       const visible = this.sceneManager ? this.sceneManager.isEntityVisible(id) : true;
 
-      // Skip re-triangulation if face already exists and its vertices haven't moved
+      // Skip re-sync if nothing changed: check generation counter (material/topology)
+      // AND vertex positions (tools mutate positions directly without bumping generation).
       if (!force) {
         const existing = this.faceGroups.get(id);
         if (existing) {
-          let dirty = false;
-          for (const vid of face.vertexIds) {
-            if (currentVertexPositions.get(vid) !== this.lastVertexPositions.get(vid)) {
-              dirty = true;
-              break;
+          const lastGen = this.lastFaceGeneration.get(id);
+          const genClean = lastGen !== undefined && lastGen === face.generation;
+          let posClean = true;
+          if (genClean) {
+            for (const vid of face.vertexIds) {
+              if (currentVertexPositions.get(vid) !== this.lastVertexPositions.get(vid)) {
+                posClean = false;
+                break;
+              }
             }
           }
-          if (!dirty) {
+          if (genClean && posClean) {
             existing.visible = visible;
-            return; // Skip — geometry unchanged
+            return; // Skip — nothing changed
           }
         }
       }
 
       this.syncFace(id, face);
+      this.lastFaceGeneration.set(id, face.generation);
       const group = this.faceGroups.get(id);
       if (group) group.visible = visible;
     });
@@ -714,7 +721,21 @@ export class SceneBridge {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
           child.geometry = geometry;
-          if (matDef) this.applyMaterialDef(child.material as THREE.MeshStandardMaterial, matDef);
+          // If highlighted, the mesh's material is the highlight material.
+          // Apply to the underlying material and update the saved original.
+          const meshMat = child.material as THREE.MeshStandardMaterial;
+          if (matDef) {
+            // Check if this mesh is currently highlighted (material swapped)
+            const isHighlighted = meshMat.type === 'MeshBasicMaterial';
+            if (isHighlighted) {
+              // Create a new material with the correct appearance
+              const newMat = this.faceMaterial.clone();
+              this.applyMaterialDef(newMat, matDef);
+              this.webglRenderer.refreshHighlightOriginal(id, newMat);
+            } else {
+              this.applyMaterialDef(meshMat, matDef);
+            }
+          }
         }
       });
     } else {

@@ -1,7 +1,7 @@
 // @archigraph tool.eraser
 // Eraser tool: click on edges/faces to delete them. Hover highlights what will be deleted.
 
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds } from '../../src/core/interfaces';
 import { BaseTool } from '../tool.select/BaseTool';
 
 export class EraserTool extends BaseTool {
@@ -58,6 +58,10 @@ export class EraserTool extends BaseTool {
 
   getVCBLabel(): string { return ''; }
   getPreview(): ToolPreview | null { return null; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: true, liveSyncOnMove: false, mutatesOnClick: true };
+  }
 
   private eraseAtCursor(event: ToolMouseEvent): void {
     if (!event.hitEntityId) return;

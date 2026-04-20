@@ -268,10 +268,15 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: "Point-pick on mouseDown with instant feedback. Shift+click toggles multi-select.\n          Drag-box selection\
-        \ with visual overlay (blue solid=window, green dashed=crossing).\n          Cursor changes to pointer over selectable\
-        \ entities. Pre-selection highlight on hover\n          (orange for faces, orange glow tube for edges). Also hosts\
-        \ BaseTool and ToolManager.\n          Resolves component IDs for component selection."
+      description: "Point-pick on mouseDown with instant feedback. Shift+click toggles multi-select.\n\
+        \          Drag-box selection with visual overlay (blue solid=window, green dashed=crossing).\n\
+        \          Cursor changes to pointer over selectable entities. Pre-selection highlight on hover\n\
+        \          (orange for faces, orange glow tube for edges). Also hosts BaseTool and ToolManager.\n\
+        \          Resolves component IDs for component selection.\n\
+        \          BaseTool provides default getEventNeeds(phase) based on category — tools override\n\
+        \          to declare snap/raycast/edgeRaycast/liveSyncOnMove/mutatesOnClick needs per phase.\n\
+        \          ToolEventNeeds drives unified buildToolEvent() in ViewportCanvas, eliminating\n\
+        \          hardcoded tool ID lists."
       notes: "## Typed Interface\n\n```typescript\nimport { ITool, ToolContext, ToolEvent, MouseEvent3D, KeyEvent } from '../types/tool';\n\
         import { SelectionManager, SelectionSet, SelectionMode } from '../data/selection';\nimport { SceneManager, Entity,\
         \ EntityType } from '../data/scene';\nimport { RaycastResult } from '../rendering/raycast';\nimport { InferenceResult\
@@ -877,10 +882,15 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: "Canvas via Three.js setSize. ResizeObserver syncs dimensions.\n          projectionMatrixInverse manually\
-        \ recomputed before every raycast. Raycasts both main\n          and overlay scenes. Edge threshold scales with camera\
-        \ distance. Edges returned before\n          faces for reliable edge selection. Middle mouse orbit/pan with window-level\
-        \ mouseup\n          listener and e.buttons===0 safety check."
+      description: "Canvas via Three.js setSize. ResizeObserver syncs dimensions.\n\
+        \          projectionMatrixInverse manually recomputed before every raycast. Raycasts both main\n\
+        \          and overlay scenes. Edge threshold scales with camera distance. Edges returned before\n\
+        \          faces for reliable edge selection. Middle mouse orbit/pan with window-level mouseup\n\
+        \          listener and e.buttons===0 safety check.\n\
+        \          Unified event system: single buildToolEvent(e, needs) replaces three separate event\n\
+        \          builders. GPU pick always runs first (O(1)), raycast/edge-raycast/snap are additive\n\
+        \          based on tool-declared ToolEventNeeds metadata. Tools declare needs via getEventNeeds(phase)\n\
+        \          — no hardcoded tool ID lists in ViewportCanvas. Throttled mousemove at 16ms (~60fps)."
   uuid: f8kRBGQr
 - id: renderer.webgl
   kind: renderer
@@ -914,7 +924,10 @@ nodes:
         \        Batched mode: syncBatched() merges all faces into single BufferGeometry with frustumCulled=false,\n\
         \        castShadow=false. Edges >200K skipped. Batched face highlighting via temporary extracted geometry.\n\
         \        Memory optimizations: glow tube object pool, numeric camera movement detection (no string allocation),\n\
-        \        reusable Vector2/Vector3/Color/Plane instances."
+        \        reusable Vector2/Vector3/Color/Plane instances.\n\
+        \        Selection highlight preserves materials: refreshHighlightOriginal() updates saved original\n\
+        \        material when syncFace changes a face's material while it is highlighted, preventing material\n\
+        \        loss on highlight restore."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -1420,12 +1433,16 @@ nodes:
       complexity: very-complex
       status: implemented
     docs:
-      description: "B-Rep geometry kernel with half-edge mesh. createEdgeWithIntersection detects\n          where\
-        \ new edges cross existing edges, splits them, and uses splitFaceWithPath\n          to split faces when vertices lie\
-        \ on boundary edges. Auto-face BFS finds coplanar\n          loops (maxDepth=20). Coplanarity tolerance 0.05. Face\
-        \ normals stored at creation\n          time — tools must recompute from vertex positions after transforms.\n          Guards:\
-        \ no self-edges, no zero-length edges, degenerate face prevention.\n          Serialization for undo/redo snapshots.\
-        \ 101 integration tests."
+      description: "B-Rep geometry kernel with half-edge mesh. createEdgeWithIntersection detects\n\
+        \          where new edges cross existing edges, splits them, and uses splitFaceWithPath\n\
+        \          to split faces when vertices lie on boundary edges. Auto-face BFS finds coplanar\n\
+        \          loops (maxDepth=20). Coplanarity tolerance 0.05. Face normals stored at creation\n\
+        \          time — tools must recompute from vertex positions after transforms.\n\
+        \          Guards: no self-edges, no zero-length edges, degenerate face prevention.\n\
+        \          Serialization for undo/redo snapshots. 101 integration tests.\n\
+        \          IFace.generation: monotonically increasing counter bumped on face creation and\n\
+        \          material assignment changes. Used by SceneBridge for dirty tracking — avoids\n\
+        \          per-vertex position hashing when only material/topology changed."
       notes: "## Typed Interface\n\n```typescript\nimport { Vector3, Matrix4, Plane, BoundingBox } from '../math/types';\n\
         \n// ========== Core Geometry Types ==========\n\nexport interface GeometryId {\n  readonly id: string; // unique\
         \ stable ID (UUID)\n}\n\nexport interface Vertex extends GeometryId {\n  position: Vector3; // float64\n  edges: HalfEdge[];\
@@ -3040,15 +3057,22 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n          (DoubleSide meshes) in\
-        \ main scene with per-face PBR materials from MaterialManager.\n          Texture mapping uses face-local UV projection\
-        \ (tangent/bitangent from first edge) so\n          textures stick to faces when moved/rotated. Edges as THREE.Line\
-        \ in overlay scene.\n          Component bounding boxes as purple wireframe. Snap system: vertices, midpoints,\n  \
-        \        and edge-edge intersections. Texture cache for data URL → THREE.Texture.\n          Preview lines and snap\
-        \ markers non-raycastable (raycast=()=>{}).\n          Batched mode: syncBatched() merges all faces into single BufferGeometry\
-        \ for large\n          imports (>10K faces). Tracks batched face/edge IDs so sync() only processes NEW geometry.\n  \
-        \        GPU pick mesh with vertex-color-encoded face IDs (ShaderMaterial, per-face RGB).\n          Batched edges skip\
-        \ raycast. Edge creation skipped for >10K face imports (~375MB savings)."
+      description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n\
+        \          (DoubleSide meshes) in main scene with per-face PBR materials from MaterialManager.\n\
+        \          Texture mapping uses face-local UV projection (tangent/bitangent from first edge) so\n\
+        \          textures stick to faces when moved/rotated. Edges as THREE.Line in overlay scene.\n\
+        \          Component bounding boxes as purple wireframe. Snap system: vertices, midpoints,\n\
+        \          and edge-edge intersections. Texture cache for data URL → THREE.Texture.\n\
+        \          Preview lines and snap markers non-raycastable (raycast=()=>{}).\n\
+        \          Batched mode: syncBatched() merges all faces into single BufferGeometry for large\n\
+        \          imports (>10K faces). Tracks batched face/edge IDs so sync() only processes NEW geometry.\n\
+        \          GPU pick mesh with vertex-color-encoded face IDs (ShaderMaterial, per-face RGB).\n\
+        \          Batched edges skip raycast. Edge creation skipped for >10K face imports (~375MB savings).\n\
+        \          Dirty tracking: dual check using IFace.generation counter (bumped on material/topology\n\
+        \          changes) and vertex position hashing (catches direct position mutations by move/rotate/scale\n\
+        \          tools). Skips re-triangulation when both are clean. When updating highlighted faces,\n\
+        \          detects swapped highlight material and updates renderer's saved original via\n\
+        \          refreshHighlightOriginal() to prevent material loss on highlight restore."
   uuid: sBr1dg3X
 - id: app.singleton
   kind: service

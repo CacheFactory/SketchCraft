@@ -26,6 +26,9 @@ export class HalfEdgeMesh {
   // edgeId -> pair of half-edge IDs (at most 2)
   private edgeToHalfEdges: Map<string, string[]> = new Map();
 
+  // Monotonically increasing counter for face generation tracking
+  private _faceGeneration = 0;
+
   // ─── Vertex operations ──────────────────────────────────────────
 
   addVertex(position: Vec3): IVertex {
@@ -158,6 +161,7 @@ export class HalfEdgeMesh {
       selected: false,
       hidden: false,
       area,
+      generation: ++this._faceGeneration,
     };
     this.faces.set(face.id, face);
 
@@ -746,6 +750,7 @@ export class HalfEdgeMesh {
         selected: false,
         hidden: false,
         area: 0,
+        generation: ++this._faceGeneration,
       });
     }
 

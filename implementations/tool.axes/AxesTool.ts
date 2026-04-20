@@ -3,7 +3,7 @@
 // All tools then use the custom orientation for drawing planes and axis locking.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 import { customAxes } from './CustomAxes';
@@ -35,24 +35,17 @@ export class AxesTool extends BaseTool {
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
 
-    // Find a face in the raycast hits
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    let targetFace = null;
-    let hitPoint: Vec3 | null = null;
-
-    for (const hit of hits) {
-      const face = this.document.geometry.getFace(hit.entityId);
-      if (face) {
-        targetFace = face;
-        hitPoint = hit.point;
-        break;
-      }
-    }
-
-    if (!targetFace || !hitPoint) {
+    // Use hit entity from event (supports GPU pick for batched mode)
+    if (!event.hitEntityId) {
       this.setStatus('Click on a face to set axes.');
       return;
     }
+    const targetFace = this.document.geometry.getFace(event.hitEntityId);
+    if (!targetFace) {
+      this.setStatus('Click on a face to set axes.');
+      return;
+    }
+    const hitPoint = event.hitPoint ?? event.worldPoint ?? { x: 0, y: 0, z: 0 };
 
     // Get an edge direction from the face for the X axis
     const verts = this.document.geometry.getFaceVertices(targetFace.id);
@@ -72,11 +65,10 @@ export class AxesTool extends BaseTool {
 
   onMouseMove(event: ToolMouseEvent): void {
     // Pre-selection highlight on faces
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    for (const hit of hits) {
-      const face = this.document.geometry.getFace(hit.entityId);
+    if (event.hitEntityId) {
+      const face = this.document.geometry.getFace(event.hitEntityId);
       if (face) {
-        this.document.selection.setPreSelection(hit.entityId);
+        this.document.selection.setPreSelection(event.hitEntityId);
         return;
       }
     }
@@ -93,6 +85,10 @@ export class AxesTool extends BaseTool {
 
   getVCBLabel(): string { return ''; }
   getPreview(): ToolPreview | null { return null; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: false, liveSyncOnMove: false, mutatesOnClick: false };
+  }
 
   // ── Visual ────────────────────────────────────────────
 

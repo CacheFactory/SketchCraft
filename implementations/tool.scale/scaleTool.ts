@@ -3,7 +3,7 @@
 // Click a grip, then drag to scale relative to the opposite grip.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 import * as THREE from 'three';
@@ -160,6 +160,11 @@ export class ScaleTool extends BaseTool {
 
   getVCBLabel(): string { return this.phase === 'drawing' ? 'Factor' : ''; }
   getPreview(): ToolPreview | null { return null; }
+
+  getEventNeeds(): ToolEventNeeds {
+    const isActive = this.phase === 'active' || this.phase === 'drawing';
+    return { snap: isActive, raycast: isActive, edgeRaycast: false, liveSyncOnMove: isActive, mutatesOnClick: true };
+  }
 
   // ── Private ────────────────────────────────────────────
 

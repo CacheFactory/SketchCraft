@@ -3,7 +3,7 @@
 // Uses Three.js clipping planes for real-time geometry cutting.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
@@ -39,14 +39,11 @@ export class SectionPlaneTool extends BaseTool {
     const point = this.getStandardDrawPoint(event) ?? this.resolvePoint(event);
     if (!point) return;
 
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
     let normal: Vec3 = { x: 0, y: 1, z: 0 };
-
-    for (const hit of hits) {
-      const face = this.document.geometry.getFace(hit.entityId);
+    if (event.hitEntityId) {
+      const face = this.document.geometry.getFace(event.hitEntityId);
       if (face) {
         normal = vec3.clone(face.normal);
-        break;
       }
     }
 
@@ -74,9 +71,8 @@ export class SectionPlaneTool extends BaseTool {
   }
 
   onMouseMove(event: ToolMouseEvent): void {
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    if (hits.length > 0) {
-      this.document.selection.setPreSelection(hits[0].entityId);
+    if (event.hitEntityId) {
+      this.document.selection.setPreSelection(event.hitEntityId);
     } else {
       this.document.selection.setPreSelection(null);
     }
@@ -104,6 +100,10 @@ export class SectionPlaneTool extends BaseTool {
 
   getVCBLabel(): string { return ''; }
   getPreview(): ToolPreview | null { return null; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: true, raycast: false, edgeRaycast: false, liveSyncOnMove: false, mutatesOnClick: false };
+  }
 
   // ── Private ────────────────────────────────────────────
 

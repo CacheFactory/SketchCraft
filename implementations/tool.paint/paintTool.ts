@@ -1,7 +1,7 @@
 // @archigraph tool.paint
 // Paint bucket tool: apply materials to faces
 
-import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolEventNeeds } from '../../src/core/interfaces';
 import { BaseTool } from '../tool.select/BaseTool';
 
 export class PaintTool extends BaseTool {
@@ -26,10 +26,8 @@ export class PaintTool extends BaseTool {
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
 
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    if (hits.length === 0) return;
-
-    const faceId = hits[0].entityId;
+    const faceId = event.hitEntityId;
+    if (!faceId) return;
     const face = this.document.geometry.getFace(faceId);
     if (!face) return;
 
@@ -68,11 +66,10 @@ export class PaintTool extends BaseTool {
 
   onMouseMove(event: ToolMouseEvent): void {
     // Highlight face under cursor
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    if (hits.length > 0) {
-      const face = this.document.geometry.getFace(hits[0].entityId);
+    if (event.hitEntityId) {
+      const face = this.document.geometry.getFace(event.hitEntityId);
       if (face) {
-        this.document.selection.setPreSelection(hits[0].entityId);
+        this.document.selection.setPreSelection(event.hitEntityId);
         return;
       }
     }
@@ -80,4 +77,8 @@ export class PaintTool extends BaseTool {
   }
 
   getVCBLabel(): string { return ''; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: true, liveSyncOnMove: false, mutatesOnClick: true };
+  }
 }

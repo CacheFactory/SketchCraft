@@ -1245,6 +1245,7 @@ export class GeometryEngine implements IGeometryEngine {
         id, vertexIds, normal,
         plane: { normal: { ...normal }, distance: planeDist },
         materialIndex, backMaterialIndex, selected, hidden, area,
+        generation: 0,
       };
       if (holeStartIndices.length > 0) f.holeStartIndices = holeStartIndices;
       this.mesh.faces.set(id, f);

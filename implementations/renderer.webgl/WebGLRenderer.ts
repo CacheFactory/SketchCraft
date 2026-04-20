@@ -738,6 +738,15 @@ export class WebGLRenderer implements IRenderer {
     }
   }
 
+  /** Update the saved original material for a highlighted object.
+   *  Call this after syncFace changes a face's material while it's highlighted. */
+  refreshHighlightOriginal(entityId: string, newMaterial: THREE.Material | THREE.Material[]): void {
+    const saved = this._highlightedObjects.get(entityId);
+    if (saved) {
+      saved.origMaterial = newMaterial;
+    }
+  }
+
   private _restoreObject(obj: THREE.Object3D): void {
     const id = obj.userData.entityId;
     if (!id) return;

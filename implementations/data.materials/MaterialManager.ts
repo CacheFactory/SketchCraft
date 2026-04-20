@@ -130,7 +130,7 @@ export class MaterialManager implements IMaterialManager {
       assignment.front = materialId;
     }
 
-    // Also update the geometry engine face materialIndex if available
+    // Also update the geometry engine face materialIndex and bump generation
     if (this.geometryEngine) {
       const face = this.geometryEngine.getFace(faceId);
       if (face) {
@@ -141,6 +141,7 @@ export class MaterialManager implements IMaterialManager {
         } else {
           face.materialIndex = idx >= 0 ? idx : 0;
         }
+        face.generation++;
       }
     }
 

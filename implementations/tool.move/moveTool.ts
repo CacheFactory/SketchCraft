@@ -2,7 +2,7 @@
 // Move tool: select face/edge, click origin, drag to destination with live preview.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
@@ -116,6 +116,11 @@ export class MoveTool extends BaseTool {
   }
 
   getVCBLabel(): string { return this.phase === 'drawing' ? 'Distance' : ''; }
+
+  getEventNeeds(): ToolEventNeeds {
+    const isActive = this.phase === 'active' || this.phase === 'drawing';
+    return { snap: isActive, raycast: isActive, edgeRaycast: false, liveSyncOnMove: isActive, mutatesOnClick: true };
+  }
 
   getPreview(): ToolPreview | null {
     if (this.phase !== 'drawing' || !this.origin || !this.currentDest) return null;

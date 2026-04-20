@@ -40,6 +40,8 @@ export interface IFace {
   hidden: boolean;
   area: number;
   holeStartIndices?: number[];
+  /** Monotonically increasing counter, bumped on any mutation. */
+  generation: number;
 }
 
 export interface IHalfEdge {
@@ -334,6 +336,20 @@ export interface IInferenceEngine {
 
 // ─── Tool Interface ──────────────────────────────────────────────
 
+/** Declares what event data a tool needs for a given interaction phase. */
+export interface ToolEventNeeds {
+  /** Whether this tool needs snap detection (vertex/edge snapping). */
+  snap: boolean;
+  /** Whether this tool needs full scene raycast (not just GPU pick). */
+  raycast: boolean;
+  /** Whether this tool needs edge-only raycast fallback when GPU pick misses. */
+  edgeRaycast: boolean;
+  /** Whether scene sync should run on every mousemove during active phase. */
+  liveSyncOnMove: boolean;
+  /** Whether mouseDown/mouseUp trigger a full scene sync (geometry/material mutation). */
+  mutatesOnClick: boolean;
+}
+
 export interface ITool {
   id: string;
   name: string;
@@ -358,6 +374,9 @@ export interface ITool {
 
   /** Return preview geometry for live rendering during tool operation. */
   getPreview(): ToolPreview | null;
+
+  /** Declare what event data this tool needs for the given phase. */
+  getEventNeeds(phase: ToolPhase): ToolEventNeeds;
 }
 
 export interface ToolPreview {

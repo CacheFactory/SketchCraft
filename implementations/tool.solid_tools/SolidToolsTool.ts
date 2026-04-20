@@ -3,7 +3,7 @@
 // @archigraph calls|tool.solid_tools|native.manifold|runtime
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, IGeometryEngine, IFace } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, IGeometryEngine, IFace, ToolEventNeeds } from '../../src/core/interfaces';
 import { BaseTool } from '../tool.select/BaseTool';
 import { ManifoldBridge, ManifoldMesh } from '../native.manifold/ManifoldBridge';
 import { getSharedManifoldBridge } from '../op.boolean_union/BooleanUnion';
@@ -37,10 +37,8 @@ export class SolidToolsTool extends BaseTool {
   onMouseDown(event: ToolMouseEvent): void {
     if (event.button !== 0) return;
 
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    if (hits.length === 0) return;
-
-    const entityId = hits[0].entityId;
+    if (!event.hitEntityId) return;
+    const entityId = event.hitEntityId;
     const entity = this.document.scene.getEntity(entityId);
     if (!entity || entity.type !== 'group') {
       this.setStatus('Click on a solid group.');
@@ -59,9 +57,8 @@ export class SolidToolsTool extends BaseTool {
   }
 
   onMouseMove(event: ToolMouseEvent): void {
-    const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-    if (hits.length > 0) {
-      this.document.selection.setPreSelection(hits[0].entityId);
+    if (event.hitEntityId) {
+      this.document.selection.setPreSelection(event.hitEntityId);
     } else {
       this.document.selection.setPreSelection(null);
     }
@@ -84,6 +81,10 @@ export class SolidToolsTool extends BaseTool {
   }
 
   getVCBLabel(): string { return ''; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: false, liveSyncOnMove: false, mutatesOnClick: true };
+  }
 
   setOperation(op: SolidOperation): void {
     this.operation = op;

@@ -3,7 +3,7 @@
 // Creates side faces + top cap. Like SketchUp's signature tool.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 
@@ -49,10 +49,9 @@ export class PushPullTool extends BaseTool {
     if (event.button !== 0) return;
 
     if (this.phase === 'idle') {
-      // Look for a face in the raycast results — the first hit may be an edge
-      const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-      for (const hit of hits) {
-        const face = this.document.geometry.getFace(hit.entityId);
+      // Use hit entity from event (supports GPU pick for batched mode)
+      if (event.hitEntityId) {
+        const face = this.document.geometry.getFace(event.hitEntityId);
         if (face) {
           this.startOnFace(face, event.screenY);
           this.setStatus('Move mouse up/down to set distance, then click to commit.');
@@ -69,21 +68,16 @@ export class PushPullTool extends BaseTool {
   onMouseMove(event: ToolMouseEvent): void {
     if (this.phase === 'idle') {
       // Pre-selection highlight: show which face will be pushed/pulled
-      const hits = this.viewport.raycastScene(event.screenX, event.screenY);
-      let foundFace = false;
-      for (const hit of hits) {
-        const face = this.document.geometry.getFace(hit.entityId);
+      if (event.hitEntityId) {
+        const face = this.document.geometry.getFace(event.hitEntityId);
         if (face) {
           this.document.selection.setPreSelection(face.id);
           this.setViewportCursor(true);
-          foundFace = true;
-          break;
+          return;
         }
       }
-      if (!foundFace) {
-        this.document.selection.setPreSelection(null);
-        this.setViewportCursor(false);
-      }
+      this.document.selection.setPreSelection(null);
+      this.setViewportCursor(false);
       return;
     }
 
@@ -118,6 +112,10 @@ export class PushPullTool extends BaseTool {
 
   getVCBLabel(): string {
     return this.phase === 'drawing' ? 'Distance' : '';
+  }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: false, liveSyncOnMove: false, mutatesOnClick: true };
   }
 
   getPreview(): ToolPreview | null {

@@ -2,7 +2,7 @@
 // Selection tool: single-click selects entity under cursor (point pick).
 // Uses hitEntityId from event (raycasted by ViewportCanvas) for reliable detection.
 
-import type { ToolMouseEvent, ToolKeyEvent } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolEventNeeds } from '../../src/core/interfaces';
 import type { Vec3 } from '../../src/core/types';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from './BaseTool';
@@ -292,6 +292,10 @@ export class SelectTool extends BaseTool {
   }
 
   getVCBLabel(): string { return ''; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: true, liveSyncOnMove: false, mutatesOnClick: false };
+  }
 
   private expandCurve(entityId: string): string[] {
     const edge = this.document.geometry.getEdge(entityId);

@@ -4,7 +4,7 @@
 import { Vec3, Plane } from '../../src/core/types';
 import type { ToolCategory, ToolPhase } from '../../src/core/types';
 import type {
-  ITool, ToolMouseEvent, ToolKeyEvent, ToolPreview,
+  ITool, ToolMouseEvent, ToolKeyEvent, ToolPreview, ToolEventNeeds,
   IModelDocument, IViewport, IInferenceEngine,
 } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
@@ -78,6 +78,22 @@ export abstract class BaseTool implements ITool {
   getVCBLabel(): string { return ''; }
   getVCBValue(): string { return this.vcbValue; }
   getPreview(): ToolPreview | null { return null; }
+
+  /**
+   * Default event needs derived from tool category and phase.
+   * Override in specific tools that differ from the default.
+   */
+  getEventNeeds(phase: ToolPhase): ToolEventNeeds {
+    const isActive = phase === 'active' || phase === 'drawing';
+    const isDrawOrMeasure = this.category === 'draw' || this.category === 'measure' || this.category === 'construct';
+    return {
+      snap: isActive && isDrawOrMeasure,
+      raycast: isActive,
+      edgeRaycast: false,
+      liveSyncOnMove: false,
+      mutatesOnClick: this.category !== 'navigate',
+    };
+  }
 
   // ── Helpers ──────────────────────────────────────────────────
 

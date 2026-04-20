@@ -2,7 +2,7 @@
 // Follow Me tool: select a face profile, then click a path edge to sweep along connected edges.
 
 import type { Vec3 } from '../../src/core/types';
-import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace, IEdge } from '../../src/core/interfaces';
+import type { ToolMouseEvent, ToolKeyEvent, ToolPreview, IFace, IEdge, ToolEventNeeds } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
 import { SweepOperation } from '../op.sweep/SweepOperation';
@@ -89,6 +89,10 @@ export class FollowMeTool extends BaseTool {
 
   getVCBLabel(): string { return ''; }
   getPreview(): ToolPreview | null { return null; }
+
+  getEventNeeds(): ToolEventNeeds {
+    return { snap: false, raycast: false, edgeRaycast: true, liveSyncOnMove: false, mutatesOnClick: true };
+  }
 
   // ── Private ────────────────────────────────────────────
 
