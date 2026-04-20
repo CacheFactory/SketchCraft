@@ -13,6 +13,9 @@ import { ViewportCanvas } from '../viewport.main/ViewportCanvas';
 import { AIChatPanel } from '../ai.chat/AIChatPanel';
 import { PreferencesWindow } from '../window.preferences/PreferencesWindow';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
+import { WebMenuBar } from '../../src/web/WebMenuBar';
+
+const isWeb = typeof (window as any).__PLATFORM__ === 'string' && (window as any).__PLATFORM__ === 'web';
 
 export function App() {
   return (
@@ -148,6 +151,7 @@ function AppLayout() {
 
   return (
     <div className="app-layout" data-theme={theme}>
+      {isWeb && <WebMenuBar />}
       <div className="app-top-bar">
         <ViewsToolbar />
       </div>

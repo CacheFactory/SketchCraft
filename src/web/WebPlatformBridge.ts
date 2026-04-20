@@ -1,0 +1,237 @@
+// @archigraph web.platform
+// Browser-compatible implementation of WindowAPI.
+// Replaces Electron IPC with Web APIs (File API, localStorage, fetch).
+
+import type { WindowAPI, MainProcessAPI, RendererEvents, UserPreferences } from '../core/ipc-types';
+import { DEFAULT_PREFERENCES } from '../core/ipc-types';
+
+type EventHandler<K extends keyof RendererEvents> = (data: RendererEvents[K]) => void;
+
+const PREFS_KEY = 'draftdown-prefs';
+const RECENT_KEY = 'draftdown-recent';
+
+export class WebPlatformBridge implements WindowAPI {
+  private listeners = new Map<string, Set<Function>>();
+
+  invoke<K extends keyof MainProcessAPI>(
+    channel: K,
+    ...args: Parameters<MainProcessAPI[K]>
+  ): ReturnType<MainProcessAPI[K]> {
+    const handler = this.handlers[channel];
+    if (!handler) {
+      console.warn(`[WebPlatformBridge] Unhandled channel: ${channel}`);
+      return Promise.resolve(null) as any;
+    }
+    return handler(...args) as ReturnType<MainProcessAPI[K]>;
+  }
+
+  on<K extends keyof RendererEvents>(
+    channel: K,
+    handler: EventHandler<K>,
+  ): () => void {
+    if (!this.listeners.has(channel)) this.listeners.set(channel, new Set());
+    this.listeners.get(channel)!.add(handler);
+    return () => this.listeners.get(channel)?.delete(handler);
+  }
+
+  off<K extends keyof RendererEvents>(
+    channel: K,
+    handler: EventHandler<K>,
+  ): void {
+    this.listeners.get(channel)?.delete(handler);
+  }
+
+  /** Emit an event to all registered listeners (used by WebMenuBar). */
+  emit<K extends keyof RendererEvents>(channel: K, data: RendererEvents[K]): void {
+    const handlers = this.listeners.get(channel);
+    if (handlers) {
+      for (const fn of handlers) (fn as EventHandler<K>)(data);
+    }
+  }
+
+  // ── Handler implementations ──────────────────────────────────
+
+  private handlers: Record<string, (...args: any[]) => Promise<any>> = {
+    'file:open': async () => {
+      const [handle] = await this.pickFile([
+        { description: 'DraftDown Files', accept: { 'application/octet-stream': ['.obj', '.stl', '.gltf', '.glb', '.dxf', '.fbx'] } },
+        { description: 'All Files', accept: { '*/*': [] } },
+      ]);
+      if (!handle) return null;
+      const file = await handle.getFile();
+      const data = await file.arrayBuffer();
+      return { filePath: file.name, data };
+    },
+
+    'file:save': async (args: { filePath: string; data: ArrayBuffer }) => {
+      this.downloadBlob(args.data, args.filePath);
+      return true;
+    },
+
+    'file:save-as': async (args: { data: ArrayBuffer; defaultName: string }) => {
+      const name = await this.saveFile(args.data, args.defaultName);
+      return name ? { filePath: name } : null;
+    },
+
+    'file:export': async (args: { data: ArrayBuffer; format: string; defaultName: string }) => {
+      const name = await this.saveFile(args.data, args.defaultName);
+      return name ? { filePath: name } : null;
+    },
+
+    'file:import': async (args: { formats: string[] }) => {
+      const extensions = args.formats.map(f => `.${f}`);
+      const [handle] = await this.pickFile([
+        { description: '3D Files', accept: { 'application/octet-stream': extensions } },
+      ]);
+      if (!handle) return null;
+      const file = await handle.getFile();
+      const data = await file.arrayBuffer();
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      return { filePath: file.name, data, format: ext };
+    },
+
+    'file:read': async () => {
+      // Not applicable on web — files are read via file:open/import
+      return new ArrayBuffer(0);
+    },
+
+    'file:write': async () => {
+      // Not applicable on web
+      return false;
+    },
+
+    'file:get-recent': async () => {
+      try {
+        return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      } catch { return []; }
+    },
+
+    'file:add-recent': async (args: { filePath: string }) => {
+      try {
+        const recent: string[] = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+        const filtered = recent.filter(r => r !== args.filePath);
+        filtered.unshift(args.filePath);
+        localStorage.setItem(RECENT_KEY, JSON.stringify(filtered.slice(0, 10)));
+      } catch {}
+    },
+
+    'prefs:get': async () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+        return { ...DEFAULT_PREFERENCES, ...stored };
+      } catch { return { ...DEFAULT_PREFERENCES }; }
+    },
+
+    'prefs:set': async (prefs: Partial<UserPreferences>) => {
+      try {
+        const current = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+        localStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...prefs }));
+      } catch {}
+    },
+
+    // Stubs for native-only features
+    'native:boolean': async () => new ArrayBuffer(0),
+    'native:step-import': async () => new ArrayBuffer(0),
+    'file:convert-skp': async () => null,
+    'app:get-version': async () => '1.0.0-web',
+    'app:get-user-data-path': async () => '/web',
+    'app:quit': async () => {},
+
+    'ai:chat': async (args: { messages: Array<{ role: string; content: unknown }>; tools: unknown[]; system: string }) => {
+      // AI chat requires a proxy to avoid CORS issues with Anthropic API.
+      // For now, return an informative error.
+      let prefs: UserPreferences;
+      try {
+        prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+      } catch { prefs = {} as any; }
+
+      if (!prefs.anthropicApiKey) {
+        return {
+          content: [{ type: 'text', text: 'AI chat requires an API key. Set it in Preferences.' }],
+        };
+      }
+
+      // Try direct fetch — will work if user has a CORS proxy or if Anthropic enables browser access
+      try {
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': prefs.anthropicApiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 4096,
+            system: args.system,
+            messages: args.messages,
+            tools: args.tools?.length ? args.tools : undefined,
+          }),
+        });
+        return await resp.json();
+      } catch (err: any) {
+        return {
+          content: [{ type: 'text', text: `AI chat error: ${err.message}` }],
+        };
+      }
+    },
+  };
+
+  // ── File helpers ──────────────────────────────────────────────
+
+  private async pickFile(types: Array<{ description: string; accept: Record<string, string[]> }>): Promise<any[]> {
+    // Use File System Access API if available (Chrome/Edge)
+    if ('showOpenFilePicker' in window) {
+      try {
+        return await (window as any).showOpenFilePicker({ types, multiple: false });
+      } catch { return []; } // User cancelled
+    }
+
+    // Fallback: hidden <input type="file">
+    return new Promise(resolve => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      const exts = types.flatMap(t => Object.values(t.accept || {}).flat());
+      if (exts.length) input.accept = exts.join(',');
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) { resolve([]); return; }
+        // Wrap in a pseudo FileSystemFileHandle
+        resolve([{ getFile: () => Promise.resolve(file) } as any]);
+      };
+      input.click();
+    });
+  }
+
+  private async saveFile(data: ArrayBuffer, defaultName: string): Promise<string | null> {
+    // Use File System Access API if available
+    if ('showSaveFilePicker' in window) {
+      try {
+        const ext = defaultName.split('.').pop() || 'obj';
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: defaultName,
+          types: [{ description: `${ext.toUpperCase()} File`, accept: { 'application/octet-stream': [`.${ext}`] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(data);
+        await writable.close();
+        return handle.name;
+      } catch { return null; } // User cancelled
+    }
+
+    // Fallback: trigger download
+    this.downloadBlob(data, defaultName);
+    return defaultName;
+  }
+
+  private downloadBlob(data: ArrayBuffer, filename: string): void {
+    const blob = new Blob([data]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+}

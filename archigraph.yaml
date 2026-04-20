@@ -1959,6 +1959,26 @@ nodes:
         \ (Three.js on canvas)\n5. Initialize ICameraController\n6. Initialize IInferenceEngine\n7. Register all tools with\
         \ IToolManager\n8. Start render loop\n9. Listen for `menu:action` events from main process"
   uuid: pqtkBdp1
+- id: web.platform
+  kind: renderer_process
+  layer: system
+  name: Web Build Target
+  x:
+    impl:
+      language: TypeScript
+      framework: React + Three.js
+      complexity: moderate
+      status: implemented
+    docs:
+      description: "Browser-based build of DraftDown. Uses the same React UI, geometry engine, tools,\n\
+        \        and Three.js renderer as the Electron version. WebPlatformBridge implements the WindowAPI\n\
+        \        interface using browser APIs (File System Access API, localStorage, fetch) so existing\n\
+        \        code runs unchanged. WebMenuBar replaces Electron native menus. Build via webpack.web.config.js\n\
+        \        producing a static site (HTML + JS). Excluded features: SKP import (native binary),\n\
+        \        auto-update, native menus, filesystem paths. 2.8 MB JS bundle.\n\
+        \        Entry: src/web/index.tsx. Bridge: src/web/WebPlatformBridge.ts.\n\
+        \        Build: npm run build:web. Dev: npm run dev:web (port 3001)."
+  uuid: wPltWeb1
 - id: worker.mesh
   kind: worker
   layer: system
@@ -3390,6 +3410,16 @@ edges:
       description: ViewportCanvas React component instantiates the Application singleton on mount and calls initialize(container)
         to bootstrap all subsystems.
   uuid: eVCcr8Ap
+- kind: creates
+  from: web.platform
+  to: app.singleton
+  layer: runtime
+  x:
+    docs:
+      description: Web entry point installs WebPlatformBridge as window.api, then renders the same App
+        component. The Application singleton boots identically to Electron — all tools, geometry engine,
+        and Three.js renderer work unchanged.
+  uuid: eWebApp1
 - kind: creates
   from: app.singleton
   to: bridge.scene
