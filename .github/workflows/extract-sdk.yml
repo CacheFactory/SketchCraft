@@ -1,0 +1,50 @@
+# Extract SketchUp Windows SDK DLLs using a Windows runner.
+# Downloads SketchUp, installs it silently, copies the SDK DLLs as an artifact.
+# Run manually via: gh workflow run extract-sdk.yml
+
+name: Extract SketchUp SDK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    steps:
+      - name: Download SketchUp Installer
+        run: |
+          Invoke-WebRequest -Uri "https://download.sketchup.com/SketchUpFull-2026-1-256-82.exe" -OutFile "$env:TEMP\SketchUp.exe"
+
+      - name: Install SketchUp (silent)
+        run: |
+          Start-Process -FilePath "$env:TEMP\SketchUp.exe" -ArgumentList "/S", "/v/qn" -Wait -NoNewWindow
+          # Wait for installation to complete
+          Start-Sleep -Seconds 30
+
+      - name: Collect SDK DLLs
+        run: |
+          $sketchupDir = "C:\Program Files\SketchUp\SketchUp 2026"
+          if (-not (Test-Path $sketchupDir)) {
+            # Try alternative paths
+            $sketchupDir = Get-ChildItem "C:\Program Files\SketchUp" -Directory | Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          Write-Host "SketchUp dir: $sketchupDir"
+
+          New-Item -ItemType Directory -Force -Path "sdk"
+
+          # Copy SketchUpAPI.dll and related DLLs
+          Get-ChildItem "$sketchupDir" -Filter "*.dll" | ForEach-Object {
+            Write-Host "Copying: $($_.Name)"
+            Copy-Item $_.FullName "sdk\"
+          }
+
+          Write-Host "SDK DLLs collected:"
+          Get-ChildItem "sdk" | Format-Table Name, Length
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sketchup-sdk-win64
+          path: sdk/
+          retention-days: 30

@@ -7,8 +7,13 @@ import { DEFAULT_PREFERENCES } from '../core/ipc-types';
 
 type EventHandler<K extends keyof RendererEvents> = (data: RendererEvents[K]) => void;
 
+declare const __SKP_CONVERT_URL__: string;
+
 const PREFS_KEY = 'draftdown-prefs';
 const RECENT_KEY = 'draftdown-recent';
+
+/** In-memory cache of files extracted from SKP conversion ZIP (MTL, textures). */
+const skpFileCache = new Map<string, ArrayBuffer>();
 
 export class WebPlatformBridge implements WindowAPI {
   private listeners = new Map<string, Set<Function>>();
@@ -54,7 +59,7 @@ export class WebPlatformBridge implements WindowAPI {
   private handlers: Record<string, (...args: any[]) => Promise<any>> = {
     'file:open': async () => {
       const [handle] = await this.pickFile([
-        { description: 'DraftDown Files', accept: { 'application/octet-stream': ['.obj', '.stl', '.gltf', '.glb', '.dxf', '.fbx'] } },
+        { description: 'DraftDown Files', accept: { 'application/octet-stream': ['.obj', '.stl', '.gltf', '.glb', '.dxf', '.fbx', '.skp'] } },
         { description: 'All Files', accept: { '*/*': [] } },
       ]);
       if (!handle) return null;
@@ -90,8 +95,12 @@ export class WebPlatformBridge implements WindowAPI {
       return { filePath: file.name, data, format: ext };
     },
 
-    'file:read': async () => {
-      // Not applicable on web — files are read via file:open/import
+    'file:read': async (args: { filePath: string }) => {
+      // Check SKP conversion cache first (for MTL/texture files)
+      const filename = args.filePath.split('/').pop()?.split('\\').pop() || '';
+      const cached = skpFileCache.get(filename);
+      if (cached) return cached;
+      // Not applicable on web otherwise
       return new ArrayBuffer(0);
     },
 
@@ -132,7 +141,74 @@ export class WebPlatformBridge implements WindowAPI {
     // Stubs for native-only features
     'native:boolean': async () => new ArrayBuffer(0),
     'native:step-import': async () => new ArrayBuffer(0),
-    'file:convert-skp': async () => null,
+    'file:convert-skp': async (args: { filePath?: string; data?: ArrayBuffer }) => {
+      // @archigraph calls|web.platform|svc.skp_convert|runtime
+      const url = typeof __SKP_CONVERT_URL__ !== 'undefined' ? __SKP_CONVERT_URL__ : '';
+      if (!url) {
+        console.warn('[WebPlatformBridge] SKP conversion not configured (no SKP_CONVERT_URL)');
+        return null;
+      }
+
+      // Get the SKP data — on web, it comes from the file picker via data
+      let skpData: ArrayBuffer | undefined = args.data;
+      if (!skpData) {
+        console.warn('[WebPlatformBridge] No SKP data provided');
+        return null;
+      }
+
+      try {
+        // Send SKP to Lambda as base64
+        const base64 = btoa(
+          new Uint8Array(skpData).reduce((s, b) => s + String.fromCharCode(b), '')
+        );
+
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file: base64,
+            filename: args.filePath || 'model.skp',
+          }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: resp.statusText }));
+          console.error('[WebPlatformBridge] SKP conversion failed:', err);
+          return null;
+        }
+
+        // Response is a ZIP file containing OBJ + MTL + textures
+        const zipData = await resp.arrayBuffer();
+
+        // Unpack ZIP using browser-native DecompressionStream or manual ZIP parsing
+        const files = await this.unpackZip(zipData);
+
+        // Find OBJ file
+        let objData: ArrayBuffer | null = null;
+        let objName = 'output.obj';
+        skpFileCache.clear();
+
+        for (const [name, data] of files) {
+          if (name.endsWith('.obj')) {
+            objData = data;
+            objName = name;
+          } else {
+            // Cache MTL and texture files for file:read
+            skpFileCache.set(name, data);
+          }
+        }
+
+        if (!objData) {
+          console.error('[WebPlatformBridge] No OBJ file in conversion result');
+          return null;
+        }
+
+        return { data: objData, filePath: objName };
+      } catch (err: any) {
+        console.error('[WebPlatformBridge] SKP conversion error:', err);
+        return null;
+      }
+    },
     'app:get-version': async () => '1.0.0-web',
     'app:get-user-data-path': async () => '/web',
     'app:quit': async () => {},
@@ -233,5 +309,71 @@ export class WebPlatformBridge implements WindowAPI {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Unpack a ZIP file into a Map of filename → ArrayBuffer.
+   * Uses a minimal ZIP parser (no external dependencies).
+   */
+  private async unpackZip(zipData: ArrayBuffer): Promise<Map<string, ArrayBuffer>> {
+    const files = new Map<string, ArrayBuffer>();
+    const view = new DataView(zipData);
+    const bytes = new Uint8Array(zipData);
+    let offset = 0;
+
+    while (offset < bytes.length - 4) {
+      // Look for local file header signature (PK\x03\x04)
+      if (view.getUint32(offset, true) !== 0x04034b50) break;
+
+      const compressionMethod = view.getUint16(offset + 8, true);
+      const compressedSize = view.getUint32(offset + 18, true);
+      const uncompressedSize = view.getUint32(offset + 22, true);
+      const nameLen = view.getUint16(offset + 26, true);
+      const extraLen = view.getUint16(offset + 28, true);
+      const headerEnd = offset + 30 + nameLen + extraLen;
+
+      const nameBytes = bytes.slice(offset + 30, offset + 30 + nameLen);
+      const fileName = new TextDecoder().decode(nameBytes);
+
+      if (compressedSize > 0 && !fileName.endsWith('/')) {
+        const fileData = bytes.slice(headerEnd, headerEnd + compressedSize);
+
+        if (compressionMethod === 0) {
+          // Stored (no compression)
+          files.set(fileName, fileData.buffer.slice(fileData.byteOffset, fileData.byteOffset + fileData.byteLength));
+        } else if (compressionMethod === 8) {
+          // Deflate — use DecompressionStream API
+          try {
+            const ds = new DecompressionStream('deflate-raw');
+            const writer = ds.writable.getWriter();
+            const reader = ds.readable.getReader();
+            writer.write(fileData);
+            writer.close();
+
+            const chunks: Uint8Array[] = [];
+            let totalLen = 0;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              totalLen += value.byteLength;
+            }
+            const result = new Uint8Array(totalLen);
+            let pos = 0;
+            for (const chunk of chunks) {
+              result.set(chunk, pos);
+              pos += chunk.byteLength;
+            }
+            files.set(fileName, result.buffer);
+          } catch (e) {
+            console.warn(`[unpackZip] Failed to decompress ${fileName}:`, e);
+          }
+        }
+      }
+
+      offset = headerEnd + compressedSize;
+    }
+
+    return files;
   }
 }

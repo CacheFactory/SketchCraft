@@ -44,6 +44,7 @@ module.exports = {
     }),
     new webpack.DefinePlugin({
       'process.env.PLATFORM': JSON.stringify('web'),
+      '__SKP_CONVERT_URL__': JSON.stringify(process.env.SKP_CONVERT_URL || ''),
     }),
   ],
   devServer: {

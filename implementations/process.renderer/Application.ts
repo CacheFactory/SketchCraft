@@ -303,7 +303,7 @@ export class Application implements IApplication {
       const ext = result.filePath.split('.').pop()?.toLowerCase();
       if (ext === 'skp') {
         this.emitProgress('Converting SKP file...', -1);
-        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
+        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath, data: result.data });
         if (converted) {
           await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
         } else {
@@ -582,7 +582,7 @@ export class Application implements IApplication {
       if (ext === 'skp') {
         this.emitProgress('Converting SKP file...', -1);
         console.log('[import] Starting SKP conversion...');
-        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
+        const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath, data: result.data });
         if (converted) {
           console.log(`[import] SKP converted, OBJ size: ${(converted.data.byteLength / 1024 / 1024).toFixed(1)}MB`);
           await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
