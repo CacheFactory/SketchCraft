@@ -19,6 +19,7 @@ jobs:
           Write-Host "Download complete: $((Get-Item "$env:TEMP\SketchUp.exe").Length / 1MB) MB"
 
       - name: Extract with 7z and find MSIs
+        continue-on-error: true
         run: |
           # 7z on Windows can handle InstallShield ISSetupStream format
           $extractDir = "$env:TEMP\su-7z"
@@ -64,9 +65,10 @@ jobs:
           # List all files for debugging
           if (-not $msiFiles) {
             Write-Host "`nAll extracted files:"
-            Get-ChildItem $extractDir -Recurse -File | Select-Object -First 100 | ForEach-Object {
+            Get-ChildItem $extractDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 100 | ForEach-Object {
               Write-Host "  $($_.FullName) ($($_.Length) bytes)"
             }
+            Write-Host "No MSIs found via 7z, will try launching installer next."
           }
 
       - name: Launch installer briefly to extract MSIs
