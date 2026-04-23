@@ -264,8 +264,10 @@ export class SelectTool extends BaseTool {
       }
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
       const ids = Array.from(this.document.selection.state.entityIds);
+      console.log(`[selectTool] Delete pressed, ${ids.length} selected:`, ids);
       if (ids.length > 0) {
         this.beginTransaction('Delete');
+        const geo = this.document.geometry;
         for (const id of ids) {
           // Delete dimensions (visual overlays)
           if (dimensionStore.isDimensionEntity(id)) {
@@ -280,12 +282,23 @@ export class SelectTool extends BaseTool {
             }
             continue;
           }
-          // Delete geometry entities
-          this.document.geometry.deleteFace(id);
-          this.document.geometry.deleteEdge(id);
+          // Delete geometry entities (face, edge, or vertex)
+          const isFace = !!geo.getFace(id);
+          const isEdge = !!geo.getEdge(id);
+          const isVertex = !!geo.getVertex(id);
+          console.log(`[selectTool] Deleting ${id}: face=${isFace}, edge=${isEdge}, vertex=${isVertex}`);
+          if (isFace) {
+            geo.deleteFace(id);
+          } else if (isEdge) {
+            geo.deleteEdge(id);
+          } else if (isVertex) {
+            geo.deleteVertex(id);
+          }
         }
         this.document.selection.clear();
         this.commitTransaction();
+        console.log('[selectTool] Dispatching geometry-changed event');
+        window.dispatchEvent(new CustomEvent('geometry-changed'));
         this.setStatus(`Deleted ${ids.length} entities.`);
       }
     }

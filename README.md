@@ -1,6 +1,8 @@
 # DraftDown
 
-A free, open-source 3D modeling application inspired by SketchUp, built with Electron + React + Three.js. Draw 2D shapes, push/pull them into 3D solids, and build architectural models with an intuitive click-based workflow.
+### [Try DraftDown in your browser at draftdownapp.com](https://draftdownapp.com)
+
+A free, open-source 3D modeling application inspired by SketchUp, built with Electron + React + Three.js. Draw 2D shapes, push/pull them into 3D solids, and build architectural models with an intuitive click-based workflow. Available as a desktop app (macOS, Windows, Linux) and a web app.
 
 ![Electron](https://img.shields.io/badge/Electron-28-blue) ![Three.js](https://img.shields.io/badge/Three.js-0.162-green) ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue) ![React](https://img.shields.io/badge/React-18-blue)
 

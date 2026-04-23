@@ -273,10 +273,11 @@ function registerIpcHandlers(): void {
           console.log(`[skp2obj] OBJ file size: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
           const objData = fs.readFileSync(tmpObj);
           console.log(`[skp2obj] Read into buffer, sending to renderer...`);
-          fs.unlinkSync(tmpObj);
+          // Don't delete temp files yet — renderer needs MTL and textures from same directory
+          // They'll be cleaned up on next conversion or app exit
           resolve({
             data: objData.buffer.slice(objData.byteOffset, objData.byteOffset + objData.byteLength),
-            filePath: args.filePath,
+            filePath: tmpObj,  // Pass temp OBJ path so renderer can find MTL/textures
           });
         } catch (readErr) {
           console.error('[skp2obj] failed to read output:', readErr);

@@ -661,7 +661,7 @@ export class GeometryEngine implements IGeometryEngine {
     vertices: Vec3[],
     faces: number[][],
     standaloneEdges?: [number, number][],
-  ): string[] {
+  ): { vertexIds: string[]; faceIds: string[] } {
     // For very large models (>10K faces), skip edge extraction to save ~30%+ memory.
     // These models use batched rendering (view-only, no per-entity selection).
     const SKIP_EDGES_THRESHOLD = 10000;
@@ -673,7 +673,10 @@ export class GeometryEngine implements IGeometryEngine {
     const edgePairs: [number, number][] = [];
 
     const cleanedFaces: number[][] = [];
-    for (const faceIndices of faces) {
+    // Track which input face indices survive cleaning (for UV/material mapping)
+    const survivingInputIndices: number[] = [];
+    for (let fi = 0; fi < faces.length; fi++) {
+      const faceIndices = faces[fi];
       if (faceIndices.length < 3) continue;
       let valid = true;
       const cleaned: number[] = [];
@@ -711,6 +714,7 @@ export class GeometryEngine implements IGeometryEngine {
       if (!planar) continue;
 
       cleanedFaces.push(cleaned);
+      survivingInputIndices.push(fi);
 
       if (!skipEdges) {
         for (let i = 0; i < cleaned.length; i++) {
@@ -735,7 +739,10 @@ export class GeometryEngine implements IGeometryEngine {
     }
 
     // Fast bulk add to mesh — numeric IDs, no UUIDs, no half-edges
-    return this.mesh.bulkAdd(vertices, cleanedFaces, edgePairs);
+    const result = this.mesh.bulkAdd(vertices, cleanedFaces, edgePairs);
+    // Expose survivingInputIndices on the result for UV/material mapping
+    (result as any).survivingInputIndices = survivingInputIndices;
+    return result;
   }
 
   // ─── Delete operations ──────────────────────────────────────────

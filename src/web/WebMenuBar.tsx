@@ -19,36 +19,80 @@ interface Menu {
   items: MenuItem[];
 }
 
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const mod = isMac ? '⌘' : 'Ctrl+';
+const shift = isMac ? '⇧' : 'Shift+';
+
 const menus: Menu[] = [
   {
     label: 'File',
     items: [
-      { label: 'New', action: 'new', shortcut: '⌘N' },
-      { label: 'Open...', action: 'open', shortcut: '⌘O' },
+      { label: 'New', action: 'new', shortcut: `${mod}N` },
+      { label: 'Open...', action: 'open', shortcut: `${mod}O` },
       { separator: true },
-      { label: 'Save', action: 'save', shortcut: '⌘S' },
-      { label: 'Save As...', action: 'save-as', shortcut: '⇧⌘S' },
+      { label: 'Save', action: 'save', shortcut: `${mod}S` },
+      { label: 'Save As...', action: 'save-as', shortcut: `${shift}${mod}S` },
       { separator: true },
-      { label: 'Import...', action: 'import' },
-      { label: 'Export...', action: 'export' },
+      { label: 'Import...', action: 'import', shortcut: `${mod}I` },
+      { label: 'Export...', action: 'export', shortcut: `${mod}E` },
     ],
   },
   {
     label: 'Edit',
     items: [
-      { label: 'Undo', action: 'undo', shortcut: '⌘Z' },
-      { label: 'Redo', action: 'redo', shortcut: '⇧⌘Z' },
+      { label: 'Undo', action: 'undo', shortcut: `${mod}Z` },
+      { label: 'Redo', action: 'redo', shortcut: `${shift}${mod}Z` },
       { separator: true },
-      { label: 'Select All', action: 'select-all', shortcut: '⌘A' },
+      { label: 'Cut', action: 'cut', shortcut: `${mod}X` },
+      { label: 'Copy', action: 'copy', shortcut: `${mod}C` },
+      { label: 'Paste', action: 'paste', shortcut: `${mod}V` },
+      { separator: true },
+      { label: 'Select All', action: 'select-all', shortcut: `${mod}A` },
       { label: 'Delete', action: 'delete', shortcut: '⌫' },
       { separator: true },
-      { label: 'Preferences...', action: 'preferences' },
+      { label: 'Preferences...', action: 'preferences', shortcut: isMac ? '⌘,' : '' },
     ],
   },
   {
     label: 'View',
     items: [
       { label: 'Zoom Extents', action: 'zoom-extents' },
+      { label: 'Zoom Window', action: 'zoom-window' },
+      { separator: true },
+      { label: 'Toggle Full Screen', action: 'fullscreen', shortcut: isMac ? '⌃⌘F' : 'F11' },
+    ],
+  },
+  {
+    label: 'Tools',
+    items: [
+      { label: 'Select', action: 'tool-select', shortcut: 'Space' },
+      { label: 'Line', action: 'tool-line', shortcut: 'L' },
+      { label: 'Rectangle', action: 'tool-rectangle', shortcut: 'R' },
+      { label: 'Circle', action: 'tool-circle', shortcut: 'C' },
+      { label: 'Arc', action: 'tool-arc', shortcut: 'A' },
+      { separator: true },
+      { label: 'Push/Pull', action: 'tool-push_pull', shortcut: 'P' },
+      { label: 'Move', action: 'tool-move', shortcut: 'M' },
+      { label: 'Rotate', action: 'tool-rotate', shortcut: 'Q' },
+      { label: 'Scale', action: 'tool-scale', shortcut: 'S' },
+      { label: 'Offset', action: 'tool-offset', shortcut: 'F' },
+      { separator: true },
+      { label: 'Eraser', action: 'tool-eraser', shortcut: 'E' },
+      { label: 'Paint Bucket', action: 'tool-paint', shortcut: 'B' },
+      { separator: true },
+      { label: 'Orbit', action: 'tool-orbit', shortcut: 'O' },
+      { label: 'Pan', action: 'tool-pan', shortcut: 'H' },
+      { label: 'Zoom', action: 'tool-zoom', shortcut: 'Z' },
+      { separator: true },
+      { label: 'Tape Measure', action: 'tool-tape_measure', shortcut: 'T' },
+      { label: 'Protractor', action: 'tool-protractor', shortcut: `${shift}P` },
+      { label: 'Dimension', action: 'tool-dimension', shortcut: 'D' },
+    ],
+  },
+  {
+    label: 'Help',
+    items: [
+      { label: 'About DraftDown', action: 'about' },
     ],
   },
 ];

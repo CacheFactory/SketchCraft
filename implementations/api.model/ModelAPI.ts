@@ -145,7 +145,7 @@ export interface IModelAPI {
   createGroup(name: string, entityIds: string[]): string;
 
   // Import
-  importGeometry(vertices: Vec3[], faces: number[][]): string[];
+  importGeometry(vertices: Vec3[], faces: number[][]): { vertexIds: string[]; faceIds: string[] };
 
   // Batch — run multiple operations with a single undo step and scene sync
   batch(name: string, fn: (api: IModelAPI) => void): void;
@@ -1429,7 +1429,7 @@ export class ModelAPI implements IModelAPI {
 
   // ── Import ────────────────────────────────────────────────────
 
-  importGeometry(vertices: Vec3[], faces: number[][]): string[] {
+  importGeometry(vertices: Vec3[], faces: number[][]): { vertexIds: string[]; faceIds: string[] } {
     return this.transact('Import Geometry', () => {
       return this.geo.bulkImport(vertices, faces);
     });

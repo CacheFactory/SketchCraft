@@ -866,7 +866,7 @@ describe('Geometry Engine', () => {
         vec3.create(0, 0, 1),
       ];
       const faces = [[0, 1, 2, 3]];
-      const ids = engine.bulkImport(verts, faces);
+      const { vertexIds: ids } = engine.bulkImport(verts, faces);
       expect(ids).toHaveLength(4);
       const mesh = engine.getMesh();
       expect(mesh.vertices.size).toBe(4);
@@ -922,7 +922,7 @@ describe('Geometry Engine', () => {
       for (let i = 0; i < 1000; i++) {
         verts.push(vec3.create(i, 0, 0));
       }
-      const ids = engine.bulkImport(verts, []);
+      const { vertexIds: ids } = engine.bulkImport(verts, []);
       expect(ids).toHaveLength(1000);
       expect(engine.getMesh().vertices.size).toBe(1000);
     });

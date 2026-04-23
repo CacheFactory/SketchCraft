@@ -184,21 +184,26 @@ export class CameraController implements ICameraController {
    */
   zoomToward(delta: number, worldPoint: Vec3 | null): void {
     if (this.projection === 'perspective') {
-      const zoomTarget = worldPoint ?? this.target;
-      const direction = normalizeVec3(subVec3(zoomTarget, this.position));
-      const distance = lengthVec3(subVec3(this.position, zoomTarget));
-      const zoomAmount = distance * delta * 0.2;
+      // Multiplicative zoom factor — never stalls regardless of distance
+      const factor = Math.pow(1.15, delta);
 
-      // Don't zoom past the point
-      if (distance - zoomAmount > 0.1) {
-        const move = scaleVec3(direction, zoomAmount);
-        this.position = addVec3(this.position, move);
-        // Also move the target to keep orbit distance proportional
-        this.target = addVec3(this.target, move);
+      if (worldPoint) {
+        // Zoom toward cursor: scale the vector from worldPoint to camera
+        // Camera moves toward/away from worldPoint, target follows proportionally
+        const camToPoint = subVec3(worldPoint, this.position);
+        const targetToPoint = subVec3(worldPoint, this.target);
+
+        // New positions = worldPoint - (worldPoint - old) * (1/factor)
+        this.position = subVec3(worldPoint, scaleVec3(camToPoint, 1 / factor));
+        this.target = subVec3(worldPoint, scaleVec3(targetToPoint, 1 / factor));
+      } else {
+        // Zoom toward orbit target: scale orbit distance
+        const offset = subVec3(this.position, this.target);
+        this.position = addVec3(this.target, scaleVec3(offset, 1 / factor));
       }
     } else {
       this._orthoSize *= 1 - delta * 0.2;
-      this._orthoSize = Math.max(0.5, Math.min(1000, this._orthoSize));
+      this._orthoSize = Math.max(0.1, Math.min(1000, this._orthoSize));
     }
     this._syncCameras();
   }

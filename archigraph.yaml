@@ -3,10 +3,13 @@ meta:
   system: DraftDown
   description: "A free, open-source 3D CAD application built with Electron + React + Three.js.\n    Features push/pull\
     \ modeling (dual-mode: extrude 2D faces, move 3D faces), drawing tools\n    (line, rectangle, circle, arc, polygon), axis\
-    \ locking, snap system, face splitting,\n    CSG boolean operations via Manifold WASM, and an AI chat assistant. Builds for\n\
-    \    macOS (signed/notarized) and Windows (NSIS installer). All computation runs locally."
+    \ locking, snap system, face splitting,\n    CSG boolean operations via Manifold WASM, and an AI chat assistant.\n    Available\
+    \ as a web app at draftdownapp.com and as desktop binaries for\n    macOS (signed/notarized DMG, x64+arm64), Windows (NSIS\
+    \ installer, x64), and Linux (AppImage, x64).\n    SKP file import via native skp2obj tool linked against SketchUp 2026 C\
+    \ SDK. All computation runs locally."
   environment:
   - desktop
+  - web
   tags:
   - cad
   - 3d-modeling
@@ -1979,6 +1982,67 @@ nodes:
         \        Entry: src/web/index.tsx. Bridge: src/web/WebPlatformBridge.ts.\n\
         \        Build: npm run build:web. Dev: npm run dev:web (port 3001)."
   uuid: wPltWeb1
+- id: web.menubar
+  kind: ui_component
+  layer: ui
+  name: Web Menu Bar
+  x:
+    impl:
+      language: TypeScript
+      framework: React
+      status: implemented
+    docs:
+      description: "Browser menu bar replacing Electron native menus. Renders File, Edit, View, Tools, and Help\n\
+        \        menus with full parity to the Electron version. Dispatches menu:action events through\n\
+        \        WebPlatformBridge.emit(). Platform-adaptive keyboard shortcuts (Cmd on Mac, Ctrl on Windows).\n\
+        \        File: src/web/WebMenuBar.tsx."
+  uuid: wMenuBar1
+- id: web.deploy
+  kind: build_pipeline
+  layer: system
+  name: Web Deployment
+  x:
+    impl:
+      status: implemented
+    docs:
+      description: "Static web build deployed to draftdownapp.com. Built with webpack.web.config.js\n\
+        \        producing dist/web/ with content-hashed JS bundle. Deployed to S3 + CloudFront.\n\
+        \        Platform env var PLATFORM=web set via DefinePlugin. Native modules (manifold-3d,\n\
+        \        opencascade.js) stubbed as empty objects for browser compatibility."
+  uuid: wDeploy1
+- id: build.electron
+  kind: build_pipeline
+  layer: system
+  name: Electron Binary Builds
+  x:
+    impl:
+      status: implemented
+    docs:
+      description: "Desktop binary builds using electron-builder. Targets:\n\
+        \        - macOS: DMG for x64 and arm64, signed and notarized (Apple Developer ID)\n\
+        \        - Windows: NSIS installer for x64\n\
+        \        - Linux: AppImage for x64\n\
+        \        Build commands: npm run dist:mac, dist:win, dist:linux, dist:all.\n\
+        \        Output directory: release/. Uses .env.signing for macOS code signing credentials.\n\
+        \        Configured in package.json build section."
+  uuid: bldElec1
+- id: tool.skp2obj
+  kind: native_tool
+  layer: system
+  name: SKP to OBJ Converter
+  x:
+    impl:
+      language: C
+      status: implemented
+    docs:
+      description: "Native C binary (tools/skp2obj) that converts SketchUp .skp files to Wavefront OBJ+MTL\n\
+        \        using the SketchUp C API (linked against SketchUpAPI.framework from SketchUp 2026).\n\
+        \        Exports geometry with materials (Kd colors, d opacity), textures (map_Kd PNGs via\n\
+        \        SUTextureWriteToFile), and UV coordinates (SUUVHelperGetFrontUVQ). Handles groups\n\
+        \        and component instances recursively with transform accumulation. Converts inches to\n\
+        \        meters. Compiled as arm64 binary. Copied to dist/tools/ during webpack build via\n\
+        \        CopyPlugin. Called by main process via file:convert-skp IPC handler."
+  uuid: tSkp2Obj
 - id: worker.mesh
   kind: worker
   layer: system
@@ -7072,6 +7136,46 @@ edges:
     docs:
       description: AI chat panel is rendered as a floating sub-window inside the main application window.
   uuid: eWnAiCht
+- kind: contains
+  from: web.platform
+  to: web.menubar
+  layer: ui
+  x:
+    docs:
+      description: Web platform renders WebMenuBar component at top of the app layout, replacing Electron native menus.
+  uuid: eWbMenu1
+- kind: calls
+  from: web.menubar
+  to: app.singleton
+  layer: runtime
+  x:
+    docs:
+      description: WebMenuBar dispatches menu:action events via WebPlatformBridge.emit() which are received by Application's menu:action listener.
+  uuid: eWbMnApp
+- kind: calls
+  from: process.main
+  to: tool.skp2obj
+  layer: system
+  x:
+    docs:
+      description: Main process executes skp2obj native binary via execFile() when handling file:convert-skp IPC. Passes input SKP path and temp OBJ output path.
+  uuid: eMainSkp
+- kind: produces
+  from: build.electron
+  to: process.main
+  layer: system
+  x:
+    docs:
+      description: electron-builder packages the Electron app into platform-specific binaries (DMG, NSIS, AppImage) with the main process as the entry point.
+  uuid: eBldMain
+- kind: produces
+  from: web.deploy
+  to: web.platform
+  layer: system
+  x:
+    docs:
+      description: Web build pipeline produces the static site deployed to draftdownapp.com from the web.platform source.
+  uuid: eDplWeb1
 views:
 - name: User Workflow
   description: End-to-end view from actor through UI to geometry

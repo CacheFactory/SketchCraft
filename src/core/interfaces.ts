@@ -40,6 +40,8 @@ export interface IFace {
   hidden: boolean;
   area: number;
   holeStartIndices?: number[];
+  /** Per-vertex UV coordinates from OBJ import (one {u,v} per vertexId). */
+  uvs?: Array<{ u: number; v: number }>;
   /** Monotonically increasing counter, bumped on any mutation. */
   generation: number;
 }
@@ -88,7 +90,7 @@ export interface IGeometryEngine {
   raycast(ray: Ray): Array<{ entityId: string; point: Vec3; distance: number; type: 'vertex' | 'edge' | 'face' }>;
   getBoundingBox(): BoundingBox;
   getMesh(): IMesh;
-  bulkImport(vertices: Vec3[], faces: number[][], standaloneEdges?: [number, number][]): string[];
+  bulkImport(vertices: Vec3[], faces: number[][], standaloneEdges?: [number, number][]): { vertexIds: string[]; faceIds: string[] };
   clone(): IGeometryEngine;
   serialize(): ArrayBuffer;
   deserialize(data: ArrayBuffer): void;

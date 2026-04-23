@@ -684,7 +684,7 @@ export class HalfEdgeMesh {
     positions: Array<{ x: number; y: number; z: number }>,
     faceIndices: number[][],
     edgePairs: [number, number][], // pre-deduped [vertexIdx1, vertexIdx2] pairs
-  ): string[] {
+  ): { vertexIds: string[]; faceIds: string[] } {
     let counter = this.vertices.size + this.edges.size + this.faces.size;
 
     // 1. Vertices — simple numeric IDs, inline position (no clone)
@@ -718,6 +718,7 @@ export class HalfEdgeMesh {
     }
 
     // 3. Faces — compute normals via Newell's method, skip half-edges
+    const faceIds: string[] = [];
     for (const indices of faceIndices) {
       const n = indices.length;
       const vIds = new Array(n);
@@ -752,8 +753,9 @@ export class HalfEdgeMesh {
         area: 0,
         generation: ++this._faceGeneration,
       });
+      faceIds.push(id);
     }
 
-    return vertexIds;
+    return { vertexIds, faceIds };
   }
 }

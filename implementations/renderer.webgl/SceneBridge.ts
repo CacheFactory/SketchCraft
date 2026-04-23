@@ -212,7 +212,19 @@ export class SceneBridge {
 
     // --- Batch all faces into one merged BufferGeometry ---
     // First pass: earcut each face to get accurate triangle count
-    const faceTriData: Array<{ indices: number[]; verts: Array<{ position: { x: number; y: number; z: number } }>; normal: { x: number; y: number; z: number }; id: string }> = [];
+    interface FaceTriDatum {
+      indices: number[];
+      verts: Array<{ position: { x: number; y: number; z: number } }>;
+      normal: { x: number; y: number; z: number };
+      id: string;
+      storedUVs: Array<{ u: number; v: number }> | undefined;
+      matId: string;
+      // UV projection axes for procedural fallback
+      ux: number; uy: number; uz: number;
+      vx: number; vy: number; vz: number;
+      p0: { x: number; y: number; z: number };
+    }
+    const faceTriData: FaceTriDatum[] = [];
     let totalTriangles = 0;
 
     mesh.faces.forEach((face, id) => {
@@ -241,18 +253,47 @@ export class SceneBridge {
         for (let i = 1; i < verts.length - 1; i++) indices.push(0, i, i + 1);
       }
       totalTriangles += indices.length / 3;
-      faceTriData.push({ indices, verts, normal: n, id });
+
+      const matDef = this.materialManager?.getFaceMaterial(id);
+      const matId = matDef?.id || '__default__';
+      const storedUVs = (face.uvs && face.uvs.length === verts.length) ? face.uvs : undefined;
+
+      faceTriData.push({ indices, verts, normal: n, id, storedUVs, matId, ux: eux, uy: euy, uz: euz, vx: evx, vy: evy, vz: evz, p0 });
     });
+
+    // Sort faces by material so we can create material groups
+    const matIdOrder = new Map<string, number>();
+    for (const d of faceTriData) {
+      if (!matIdOrder.has(d.matId)) matIdOrder.set(d.matId, matIdOrder.size);
+    }
+    faceTriData.sort((a, b) => (matIdOrder.get(a.matId)! - matIdOrder.get(b.matId)!));
 
     const posArr = new Float32Array(totalTriangles * 3 * 3);
     const normArr = new Float32Array(totalTriangles * 3 * 3);
+    const uvArr = new Float32Array(totalTriangles * 3 * 2);
     const pickColorArr = new Float32Array(totalTriangles * 3 * 3); // RGB pick colors per vertex
     let triOffset = 0;
     this._batchedPickIdToFace.clear();
     this._batchedFaceTriRange.clear();
     let pickId = 1; // 0 = background/no entity
 
-    for (const { indices, verts, normal: n, id } of faceTriData) {
+    // Track material groups: { matId, startVertex, vertexCount }
+    const matGroups: Array<{ matId: string; start: number; count: number }> = [];
+    let currentMatId = '';
+    let groupStart = 0;
+
+    for (const datum of faceTriData) {
+      const { indices, verts, normal: n, id, storedUVs, matId } = datum;
+
+      // Track material group boundaries
+      if (matId !== currentMatId) {
+        if (currentMatId && triOffset > groupStart) {
+          matGroups.push({ matId: currentMatId, start: groupStart, count: triOffset - groupStart });
+        }
+        currentMatId = matId;
+        groupStart = triOffset;
+      }
+
       // Encode this face's pick ID as RGB
       const pr = ((pickId >> 16) & 0xff) / 255;
       const pg = ((pickId >> 8) & 0xff) / 255;
@@ -266,17 +307,32 @@ export class SceneBridge {
       this._batchedFaceTriRange.set(id, { start: faceVertStart, count: faceVertCount });
 
       for (let i = 0; i < indices.length; i++) {
-        const v = verts[indices[i]];
-        const base = triOffset * 3;
-        posArr[base] = v.position.x;
-        posArr[base + 1] = v.position.y;
-        posArr[base + 2] = v.position.z;
-        normArr[base] = n.x;
-        normArr[base + 1] = n.y;
-        normArr[base + 2] = n.z;
-        pickColorArr[base] = pr;
-        pickColorArr[base + 1] = pg;
-        pickColorArr[base + 2] = pb;
+        const vi = indices[i];
+        const v = verts[vi];
+        const base3 = triOffset * 3;
+        const base2 = triOffset * 2;
+        posArr[base3] = v.position.x;
+        posArr[base3 + 1] = v.position.y;
+        posArr[base3 + 2] = v.position.z;
+        normArr[base3] = n.x;
+        normArr[base3 + 1] = n.y;
+        normArr[base3 + 2] = n.z;
+        pickColorArr[base3] = pr;
+        pickColorArr[base3 + 1] = pg;
+        pickColorArr[base3 + 2] = pb;
+
+        if (storedUVs) {
+          const uv = storedUVs[vi];
+          uvArr[base2] = uv.u;
+          uvArr[base2 + 1] = uv.v;
+        } else {
+          const dx = v.position.x - datum.p0.x;
+          const dy = v.position.y - datum.p0.y;
+          const dz = v.position.z - datum.p0.z;
+          uvArr[base2] = dx * datum.ux + dy * datum.uy + dz * datum.uz;
+          uvArr[base2 + 1] = dx * datum.vx + dy * datum.vy + dz * datum.vz;
+        }
+
         triOffset++;
       }
 
@@ -285,21 +341,46 @@ export class SceneBridge {
         this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
       }
     }
+    // Close final material group
+    if (currentMatId && triOffset > groupStart) {
+      matGroups.push({ matId: currentMatId, start: groupStart, count: triOffset - groupStart });
+    }
 
-    console.log(`[syncBatched] Built ${totalTriangles} triangles`);
+    console.log(`[syncBatched] Built ${totalTriangles} triangles, ${matGroups.length} material groups`);
 
     this._batchedPositionBuffer = posArr;
 
     const batchGeo = new THREE.BufferGeometry();
     batchGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     batchGeo.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+    batchGeo.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+
+    // Add material groups if multiple materials
+    const batchMaterials: THREE.MeshStandardMaterial[] = [];
+    if (matGroups.length > 1) {
+      for (let gi = 0; gi < matGroups.length; gi++) {
+        const g = matGroups[gi];
+        batchGeo.addGroup(g.start, g.count, gi);
+        const mat = this.faceMaterial.clone();
+        const matDef = this.materialManager?.getMaterial(g.matId);
+        if (matDef) this.applyMaterialDef(mat, matDef);
+        batchMaterials.push(mat);
+      }
+    } else {
+      const mat = this.faceMaterial.clone();
+      if (matGroups.length === 1) {
+        const matDef = this.materialManager?.getMaterial(matGroups[0].matId);
+        if (matDef) this.applyMaterialDef(mat, matDef);
+      }
+      batchMaterials.push(mat);
+    }
+
     batchGeo.computeBoundingSphere();
     batchGeo.computeBoundingBox();
 
     console.log(`[syncBatched] Geometry buffer: ${posArr.length} floats, boundingSphere radius: ${batchGeo.boundingSphere?.radius.toFixed(1)}, bbox: ${JSON.stringify(batchGeo.boundingBox?.min)}-${JSON.stringify(batchGeo.boundingBox?.max)}`);
 
-    const batchMat = this.faceMaterial.clone();
-    const batchMesh = new THREE.Mesh(batchGeo, batchMat);
+    const batchMesh = new THREE.Mesh(batchGeo, batchMaterials.length === 1 ? batchMaterials[0] : batchMaterials);
     batchMesh.name = 'batched-faces';
     batchMesh.castShadow = false;  // Shadows disabled for large batched meshes (doubles GPU work)
     batchMesh.receiveShadow = false;
@@ -455,6 +536,54 @@ export class SceneBridge {
       mesh.vertices.forEach((v, id) => {
         currentVertexPositions.set(id, `${v.position.x.toFixed(6)},${v.position.y.toFixed(6)},${v.position.z.toFixed(6)}`);
       });
+    }
+
+    // In batched mode, detect deleted batched faces and remove their triangles
+    console.log(`[sync] batchedMode=${this._batchedMode}, posBuffer=${!!this._batchedPositionBuffer}, batchedFaceCount=${this._batchedFaceIds.size}, meshFaceCount=${mesh.faces.size}`);
+    if (this._batchedMode && this._batchedPositionBuffer) {
+      const deletedBatchedFaces: string[] = [];
+      for (const id of this._batchedFaceIds) {
+        if (!mesh.faces.has(id)) deletedBatchedFaces.push(id);
+      }
+      if (deletedBatchedFaces.length > 0) {
+        const batchMesh = this.scene.getObjectByName('batched-faces') as THREE.Mesh | undefined;
+        if (batchMesh) {
+          const posBuffer = this._batchedPositionBuffer;
+          const posAttr = batchMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+          const normAttr = batchMesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+          const uvAttr = batchMesh.geometry.getAttribute('uv') as THREE.BufferAttribute;
+
+          for (const id of deletedBatchedFaces) {
+            const range = this._batchedFaceTriRange.get(id);
+            if (range) {
+              // Set all vertices to NaN — GPU discards any triangle with NaN positions
+              for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
+                posBuffer[i] = NaN;
+              }
+              // Also NaN the normals
+              if (normAttr) {
+                const normArr = normAttr.array as Float32Array;
+                for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
+                  normArr[i] = NaN;
+                }
+                normAttr.needsUpdate = true;
+              }
+              // And zero the UVs
+              if (uvAttr) {
+                const uvArr = uvAttr.array as Float32Array;
+                for (let i = range.start * 2; i < (range.start + range.count) * 2; i++) {
+                  uvArr[i] = 0;
+                }
+                uvAttr.needsUpdate = true;
+              }
+            }
+            this._batchedFaceIds.delete(id);
+            this._batchedFaceTriRange.delete(id);
+          }
+          posAttr.needsUpdate = true;
+          console.log(`[sync] Removed ${deletedBatchedFaces.length} batched faces from batch buffer`);
+        }
+      }
     }
 
     // Sync faces (auto-assign to active layer, respect layer visibility)
@@ -652,9 +781,10 @@ export class SceneBridge {
     const ny = n.y * nudge;
     const nz = n.z * nudge;
 
-    // Compute UV basis from the face's own geometry so textures stick to the
-    // face when it moves or rotates. U axis = first edge direction, V axis =
-    // perpendicular within the face plane. Origin = first vertex.
+    // Use stored OBJ UVs when available, otherwise compute procedural UVs
+    const hasStoredUVs = face.uvs && face.uvs.length === verts.length;
+
+    // Compute UV basis for procedural UVs (or for earcut projection)
     const p0 = verts[0].position;
     const p1 = verts[1].position;
     let ux = p1.x - p0.x, uy = p1.y - p0.y, uz = p1.z - p0.z;
@@ -694,16 +824,24 @@ export class SceneBridge {
     const uvs: number[] = [];
 
     for (let i = 0; i < triIndices.length; i++) {
-      const v = verts[triIndices[i]];
+      const vi = triIndices[i];
+      const v = verts[vi];
       positions.push(v.position.x + nx, v.position.y + ny, v.position.z + nz);
       normals.push(n.x, n.y, n.z);
-      const dx = v.position.x - p0.x;
-      const dy = v.position.y - p0.y;
-      const dz = v.position.z - p0.z;
-      uvs.push(
-        (dx * ux + dy * uy + dz * uz) * uvScale,
-        (dx * vx + dy * vy + dz * vz) * uvScale,
-      );
+      if (hasStoredUVs) {
+        // Use OBJ texture coordinates directly
+        const uv = face.uvs![vi];
+        uvs.push(uv.u, uv.v);
+      } else {
+        // Procedural planar projection
+        const dx = v.position.x - p0.x;
+        const dy = v.position.y - p0.y;
+        const dz = v.position.z - p0.z;
+        uvs.push(
+          (dx * ux + dy * uy + dz * uz) * uvScale,
+          (dx * vx + dy * vy + dz * vz) * uvScale,
+        );
+      }
     }
 
     const geometry = new THREE.BufferGeometry();

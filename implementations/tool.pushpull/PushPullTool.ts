@@ -194,14 +194,22 @@ export class PushPullTool extends BaseTool {
   }
 
   /**
-   * Check if a face is part of a 3D solid — i.e., has adjacent faces
-   * with different normals (side walls). If so, push/pull just moves
-   * the face vertices. Otherwise it's a standalone 2D face and we extrude.
+   * Check if a face already has side walls on ALL edges — meaning it's
+   * part of an existing 3D solid from a previous push/pull. Only then
+   * should we move vertices instead of creating new geometry.
+   *
+   * SketchUp behavior: the first push/pull always creates new side faces.
+   * Only subsequent push/pulls on the same face (which now has side walls)
+   * will stretch existing walls by moving vertices.
    */
   private hasSideWalls(faceId: string, normal: Vec3): boolean {
     const faceEdges = this.document.geometry.getFaceEdges(faceId);
+    if (faceEdges.length === 0) return false;
+
+    // Every edge must have a perpendicular side wall for this to be a "move" operation
     for (const edge of faceEdges) {
       const adjacentFaces = this.document.geometry.getEdgeFaces(edge.id);
+      let hasWallOnThisEdge = false;
       for (const adj of adjacentFaces) {
         if (adj.id === faceId) continue;
         // Recompute adjacent face normal from current vertex positions
@@ -210,12 +218,16 @@ export class PushPullTool extends BaseTool {
         if (adjVerts.length >= 3) {
           adjNormal = this.computeNormalFromPositions(adjVerts.map(v => v.position));
         }
-        // Check if adjacent face has a different normal (not coplanar)
+        // Side wall = roughly perpendicular to push/pull face (dot ≈ 0)
         const dot = Math.abs(vec3.dot(adjNormal, normal));
-        if (dot < 0.9) return true; // Non-coplanar neighbor = side wall
+        if (dot < 0.3) {
+          hasWallOnThisEdge = true;
+          break;
+        }
       }
+      if (!hasWallOnThisEdge) return false; // Missing wall on this edge → need to extrude
     }
-    return false;
+    return true;
   }
 
   private commitExtrusion(): void {

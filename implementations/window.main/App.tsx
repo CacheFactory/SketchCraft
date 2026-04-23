@@ -15,7 +15,9 @@ import { PreferencesWindow } from '../window.preferences/PreferencesWindow';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 import { WebMenuBar } from '../../src/web/WebMenuBar';
 
-const isWeb = typeof (window as any).__PLATFORM__ === 'string' && (window as any).__PLATFORM__ === 'web';
+function useIsWeb() {
+  return typeof (window as any).__PLATFORM__ === 'string' && (window as any).__PLATFORM__ === 'web';
+}
 
 export function App() {
   return (
@@ -41,6 +43,7 @@ for (const [toolId, binding] of Object.entries(DEFAULT_PREFERENCES.shortcuts)) {
 function AppLayout() {
   const { theme, app, activateTool, undo, redo, updateState, syncToolState, syncPreviews } = useApp();
   const [prefsVisible, setPrefsVisible] = useState(false);
+  const isWeb = useIsWeb();
 
   // Handle keyboard shortcuts globally
   useEffect(() => {
@@ -131,6 +134,16 @@ function AppLayout() {
         return;
       }
 
+      // Web-only actions (not in MenuAction type)
+      if ((action as string) === 'fullscreen') {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
+        return;
+      }
+
       switch (action) {
         case 'preferences':
           setPrefsVisible(true);
@@ -142,6 +155,18 @@ function AppLayout() {
         }
         case 'select-all':
           (app as any)?.document?.selection?.selectAll();
+          break;
+        case 'cut':
+          document.execCommand('cut');
+          break;
+        case 'copy':
+          document.execCommand('copy');
+          break;
+        case 'paste':
+          document.execCommand('paste');
+          break;
+        case 'about':
+          alert('DraftDown — 3D CAD Application');
           break;
       }
     });

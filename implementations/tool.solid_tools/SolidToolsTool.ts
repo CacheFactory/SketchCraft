@@ -214,7 +214,7 @@ export class SolidToolsTool extends BaseTool {
 
       // Import the result mesh into the geometry engine
       const engine = this.document.geometry;
-      const importedIds = engine.bulkImport(resultMesh.vertices, resultMesh.faces);
+      const { vertexIds: importedIds } = engine.bulkImport(resultMesh.vertices, resultMesh.faces);
 
       // Create a new group for the result
       const newGroup = this.document.scene.createGroup(

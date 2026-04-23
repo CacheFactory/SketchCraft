@@ -38,6 +38,9 @@ import { SectionPlaneTool } from '../tool.section_plane/SectionPlaneTool';
 import { SolidToolsTool } from '../tool.solid_tools/SolidToolsTool';
 import { AxesTool } from '../tool.axes/AxesTool';
 import { ModelAPI, IModelAPI } from '../api.model/ModelAPI';
+// @archigraph file.obj-format
+import { importObj, parseMtl } from '../file.obj/ObjFormat';
+import type { ObjImportResult, ObjMaterial } from '../file.obj/ObjFormat';
 // SKP files are converted to OBJ by the native skp2obj tool in the main process
 
 export class Application implements IApplication {
@@ -136,6 +139,11 @@ export class Application implements IApplication {
   private setupIPCListeners(): void {
     if (typeof window === 'undefined' || typeof window.api === 'undefined') return;
 
+    // Listen for geometry-changed events from tools that mutate geometry directly
+    window.addEventListener('geometry-changed', () => {
+      this.syncScene();
+    });
+
     window.api.on('menu:action', ({ action }) => {
       switch (action) {
         case 'new': this.newDocument(); break;
@@ -145,14 +153,36 @@ export class Application implements IApplication {
         case 'import': this.importFile(); break;
         case 'undo': this.document.history.undo(); this.sceneBridge.sync(true); break;
         case 'redo': this.document.history.redo(); this.sceneBridge.sync(true); break;
-        case 'delete':
+        case 'delete': {
           const ids = Array.from(this.document.selection.state.entityIds);
+          console.log(`[delete] Deleting ${ids.length} entities:`, ids);
           this.document.history.beginTransaction('Delete');
-          ids.forEach(id => this.document.scene.removeEntity(id));
+          const geo = this.document.geometry;
+          for (const id of ids) {
+            const face = geo.getFace(id);
+            const edge = geo.getEdge(id);
+            const vertex = geo.getVertex(id);
+            console.log(`[delete] ${id}: face=${!!face}, edge=${!!edge}, vertex=${!!vertex}`);
+            // Try geometry deletion first (faces, edges, vertices)
+            if (face) {
+              geo.deleteFace(id);
+              console.log(`[delete] Deleted face ${id}, still exists: ${!!geo.getFace(id)}`);
+            } else if (edge) {
+              geo.deleteEdge(id);
+            } else if (vertex) {
+              geo.deleteVertex(id);
+            } else {
+              // Fall back to scene entity deletion (groups, components)
+              this.document.scene.removeEntity(id);
+            }
+          }
           this.document.selection.clear();
           this.document.history.commitTransaction();
           this.sceneBridge.sync();
           break;
+        }
+        case 'export': this.exportFile('obj'); break;
+        case 'zoom-extents': this.viewport.camera.fitToBox(this.document.geometry.getBoundingBox()); break;
         case 'select-all':
           this.document.selection.selectAll();
           break;
@@ -275,14 +305,14 @@ export class Application implements IApplication {
         this.emitProgress('Converting SKP file...', -1);
         const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
         if (converted) {
-          await this.importOBJ(converted.data);
+          await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
         } else {
           console.error('Failed to convert SKP file');
           return;
         }
       } else {
         this.emitProgress('Loading file...', 0);
-        await this.importOBJ(result.data);
+        await this.importOBJ(result.data, result.filePath);
       }
       this.document.filePath = result.filePath;
       this.document.markClean();
@@ -366,50 +396,28 @@ export class Application implements IApplication {
   }
 
   /** Import OBJ data into the current document using fast bulk import */
-  private async importOBJ(data: ArrayBuffer): Promise<void> {
+  private async importOBJ(data: ArrayBuffer, filePath?: string, opts?: { rotateSkp?: boolean }): Promise<void> {
     this.emitProgress('Parsing file...', 0.1);
     await this.yieldUI();
 
     const text = new TextDecoder().decode(data);
-    const lines = text.split('\n');
+
+    // Use the full OBJ parser for proper UV, material, and texture support
+    const parsed = importObj(text);
 
     this.document.newDocument();
     const geo = this.document.geometry;
 
-    const vertices: Array<{ x: number; y: number; z: number }> = [];
-    const faces: number[][] = [];
-    const standaloneEdges: [number, number][] = [];
+    // Build vertex and face arrays for bulkImport
+    let vertices = parsed.vertices;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.length === 0 || trimmed.charCodeAt(0) === 35) continue;
-
-      const parts = trimmed.split(/\s+/);
-      const cmd = parts[0];
-
-      if (cmd === 'v' && parts.length >= 4) {
-        vertices.push({
-          x: parseFloat(parts[1]),
-          y: parseFloat(parts[2]),
-          z: parseFloat(parts[3]),
-        });
-      } else if (cmd === 'f' && parts.length >= 4) {
-        const indices: number[] = [];
-        for (let i = 1; i < parts.length; i++) {
-          const idx = parseInt(parts[i].split('/')[0], 10) - 1;
-          if (idx >= 0 && idx < vertices.length) indices.push(idx);
-        }
-        if (indices.length >= 3) faces.push(indices);
-      } else if (cmd === 'l' && parts.length >= 3) {
-        for (let i = 1; i < parts.length - 1; i++) {
-          const i1 = parseInt(parts[i], 10) - 1;
-          const i2 = parseInt(parts[i + 1], 10) - 1;
-          if (i1 >= 0 && i2 >= 0) standaloneEdges.push([i1, i2]);
-        }
-      }
+    // SKP files use Z-up; rotate -90° around X to convert to Y-up
+    if (opts?.rotateSkp) {
+      vertices = vertices.map(v => ({ x: v.x, y: v.z, z: -v.y }));
     }
+    const faces = parsed.faces.map(f => f.vertexIndices);
 
-    console.log(`[import] Parsed OBJ: ${vertices.length} vertices, ${faces.length} faces, ${standaloneEdges.length} standalone edges`);
+    console.log(`[import] Parsed OBJ: ${vertices.length} vertices, ${faces.length} faces, ${parsed.texCoords.length} texCoords`);
     console.log(`[import] Memory before bulkImport: ${(performance as any).memory ? ((performance as any).memory.usedJSHeapSize / 1024 / 1024).toFixed(0) + 'MB' : 'N/A'}`);
     this.emitProgress(
       `Building geometry: ${vertices.length.toLocaleString()} vertices, ${faces.length.toLocaleString()} faces...`,
@@ -417,20 +425,118 @@ export class Application implements IApplication {
     );
     await this.yieldUI();
 
+    let faceIds: string[] = [];
+    let survivingInputIndices: number[] = [];
+
     try {
       const t0 = performance.now();
-      geo.bulkImport(vertices, faces, standaloneEdges.length > 0 ? standaloneEdges : undefined);
+      const result = geo.bulkImport(vertices, faces);
+      faceIds = result.faceIds;
+      survivingInputIndices = (result as any).survivingInputIndices || [];
       const t1 = performance.now();
-      console.log(`[import] bulkImport completed in ${(t1 - t0).toFixed(0)}ms`);
-      // Free intermediate parse data to reduce peak memory
-      vertices.length = 0;
-      faces.length = 0;
-      standaloneEdges.length = 0;
+      console.log(`[import] bulkImport completed in ${(t1 - t0).toFixed(0)}ms — ${faceIds.length} faces created`);
     } catch (e) {
       console.error('[import] bulkImport FAILED:', e);
       this.emitProgress('Import failed: ' + (e as Error).message, 1, false);
       await this.yieldUI();
       return;
+    }
+
+    // ── Load MTL materials and textures ────────────────────────────
+    const hasTexCoords = parsed.texCoords.length > 0;
+    const hasMaterials = parsed.materialLibraries.length > 0;
+    let objMaterials: ObjMaterial[] = [];
+    const textureCache = new Map<string, string>(); // filename → data URL
+
+    if (hasMaterials && filePath) {
+      this.emitProgress('Loading materials...', 0.55);
+      await this.yieldUI();
+
+      const dir = filePath.replace(/[/\\][^/\\]+$/, '');
+      for (const mtlFile of parsed.materialLibraries) {
+        try {
+          const mtlPath = `${dir}/${mtlFile}`;
+          const mtlData = await window.api.invoke('file:read', { filePath: mtlPath });
+          if (mtlData && mtlData.byteLength > 0) {
+            const mtlText = new TextDecoder().decode(mtlData);
+            const mats = parseMtl(mtlText);
+            objMaterials.push(...mats);
+            console.log(`[import] Loaded MTL: ${mtlFile} (${mats.length} materials)`);
+
+            // Load texture images referenced by materials
+            for (const mat of mats) {
+              const texFiles = [mat.diffuseMap, mat.normalMap].filter(Boolean) as string[];
+              for (const texFile of texFiles) {
+                if (textureCache.has(texFile)) continue;
+                try {
+                  const texPath = `${dir}/${texFile}`;
+                  const texData = await window.api.invoke('file:read', { filePath: texPath });
+                  if (texData && texData.byteLength > 0) {
+                    const ext = texFile.split('.').pop()?.toLowerCase() || 'png';
+                    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+                    const base64 = this.arrayBufferToBase64(texData);
+                    textureCache.set(texFile, `data:${mime};base64,${base64}`);
+                  }
+                } catch (e) {
+                  console.warn(`[import] Failed to load texture: ${texFile}`, e);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[import] Failed to load MTL: ${mtlFile}`, e);
+        }
+      }
+    }
+
+    // ── Create MaterialDef entries and map OBJ material names ──────
+    const matManager = this.document.materials;
+    const matNameToId = new Map<string, string>();
+
+    for (const objMat of objMaterials) {
+      const albedoMap = objMat.diffuseMap ? textureCache.get(objMat.diffuseMap) : undefined;
+      const normalMap = objMat.normalMap ? textureCache.get(objMat.normalMap) : undefined;
+      const kd = objMat.diffuseColor || { x: 0.75, y: 0.75, z: 0.75 };
+
+      const matDef = matManager.addMaterial({
+        name: objMat.name,
+        color: { r: kd.x, g: kd.y, b: kd.z, a: objMat.opacity ?? 1 },
+        opacity: objMat.opacity ?? 1,
+        roughness: objMat.shininess ? Math.max(0.05, 1 - (objMat.shininess / 1000)) : 0.7,
+        metalness: 0,
+        albedoMap,
+        normalMap,
+      });
+      matNameToId.set(objMat.name, matDef.id);
+    }
+
+    // ── Assign UVs and materials to faces ─────────────────────────
+    if ((hasTexCoords || matNameToId.size > 0) && survivingInputIndices.length === faceIds.length) {
+      this.emitProgress('Applying materials and UVs...', 0.7);
+      await this.yieldUI();
+
+      const mesh = geo.getMesh();
+      for (let i = 0; i < faceIds.length; i++) {
+        const faceId = faceIds[i];
+        const inputIdx = survivingInputIndices[i];
+        const objFace = parsed.faces[inputIdx];
+        const face = mesh.faces.get(faceId);
+        if (!face || !objFace) continue;
+
+        // Assign per-vertex UVs if available
+        if (objFace.texCoordIndices.length === objFace.vertexIndices.length && parsed.texCoords.length > 0) {
+          face.uvs = objFace.texCoordIndices.map(ti => {
+            const tc = parsed.texCoords[ti];
+            return tc ? { u: tc.u, v: tc.v } : { u: 0, v: 0 };
+          });
+        }
+
+        // Assign material
+        if (objFace.materialName && matNameToId.has(objFace.materialName)) {
+          matManager.applyToFace(faceId, matNameToId.get(objFace.materialName)!);
+        }
+      }
+      console.log(`[import] Assigned UVs/materials to ${faceIds.length} faces`);
     }
 
     this.emitProgress('Rendering scene...', 0.85);
@@ -454,6 +560,16 @@ export class Application implements IApplication {
     }
   }
 
+  /** Convert ArrayBuffer to base64 string */
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
   async importFile(): Promise<void> {
     if (typeof window.api === 'undefined') return;
     const result = await window.api.invoke('file:import', {
@@ -469,11 +585,11 @@ export class Application implements IApplication {
         const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath });
         if (converted) {
           console.log(`[import] SKP converted, OBJ size: ${(converted.data.byteLength / 1024 / 1024).toFixed(1)}MB`);
-          await this.importOBJ(converted.data);
+          await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
         }
       } else if (ext === 'obj') {
         this.emitProgress('Loading OBJ file...', 0);
-        await this.importOBJ(result.data);
+        await this.importOBJ(result.data, result.filePath);
       } else {
         console.log(`Importing ${result.format} file: ${result.filePath}`);
       }

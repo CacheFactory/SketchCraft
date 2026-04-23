@@ -103,11 +103,7 @@ export function applyManifoldResult(
   // Bulk-import the result mesh
   const rawVerts = resultMesh.vertices;
   const rawFaces = resultMesh.faces;
-  const importedIds = engine.bulkImport(rawVerts, rawFaces);
-
-  // bulkImport returns vertex IDs first, then face IDs
-  const newVertexIds = importedIds.slice(0, rawVerts.length);
-  const newFaceIds = importedIds.slice(rawVerts.length);
+  const { vertexIds: newVertexIds, faceIds: newFaceIds } = engine.bulkImport(rawVerts, rawFaces);
 
   // Collect edge IDs from the new faces
   const newEdgeIds: string[] = [];
