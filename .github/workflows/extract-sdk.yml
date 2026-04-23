@@ -1,5 +1,5 @@
 # Extract SketchUp Windows SDK DLLs using a Windows runner.
-# Uses msiexec to extract MSI contents without full installation.
+# Runs the installer briefly to extract MSIs to temp, then uses msiexec /a to extract.
 # Run manually via: gh workflow run extract-sdk.yml
 
 name: Extract SketchUp SDK
@@ -10,86 +10,156 @@ on:
 jobs:
   extract:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Download SketchUp Installer
         run: |
-          Write-Host "Downloading SketchUp 2026 installer (1.96 GB)..."
+          Write-Host "Downloading SketchUp 2026 installer..."
           Invoke-WebRequest -Uri "https://download.sketchup.com/SketchUpFull-2026-1-256-82.exe" -OutFile "$env:TEMP\SketchUp.exe"
-          Write-Host "Download complete."
+          Write-Host "Download complete: $((Get-Item "$env:TEMP\SketchUp.exe").Length / 1MB) MB"
 
-      - name: Extract installer contents
+      - name: Extract with 7z and find MSIs
         run: |
-          # Run the installer with extraction-only flags
-          # InstallShield: /extract_all extracts MSI packages without installing
-          Write-Host "Extracting installer contents..."
-          $extractDir = "$env:TEMP\su-extract"
+          # 7z on Windows can handle InstallShield ISSetupStream format
+          $extractDir = "$env:TEMP\su-7z"
           New-Item -ItemType Directory -Force -Path $extractDir
 
-          # Try extraction mode first
-          $proc = Start-Process -FilePath "$env:TEMP\SketchUp.exe" `
-            -ArgumentList "/extract_all:$extractDir" `
-            -Wait -NoNewWindow -PassThru
-          Write-Host "Extract exit code: $($proc.ExitCode)"
+          Write-Host "Extracting with 7z..."
+          & 7z x "$env:TEMP\SketchUp.exe" -o"$extractDir" -y 2>&1 | Select-Object -Last 10
 
-          # List what we got
-          Write-Host "Extracted files:"
-          Get-ChildItem $extractDir -Recurse -File | ForEach-Object {
-            Write-Host "  $($_.FullName) ($($_.Length) bytes)"
-          }
+          Write-Host "`nSearching for MSI files..."
+          $msiFiles = Get-ChildItem $extractDir -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue
+          $msiFiles | ForEach-Object { Write-Host "  MSI: $($_.FullName) ($([math]::Round($_.Length/1MB, 1)) MB)" }
 
-          # If extract didn't work, try running with /a (admin install = extract MSI)
-          if (-not (Get-ChildItem $extractDir -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue)) {
-            Write-Host "No MSI found via extract_all, trying /a install..."
-            $adminDir = "$env:TEMP\su-admin"
-            New-Item -ItemType Directory -Force -Path $adminDir
+          # If no MSIs found, try extracting the [0] blob
+          if (-not $msiFiles) {
+            Write-Host "No MSIs at top level, trying to extract [0] blob..."
+            $blob = Get-ChildItem $extractDir -Recurse -Filter "[0]" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($blob) {
+              Write-Host "Found blob: $($blob.FullName)"
+              $blobDir = "$env:TEMP\su-blob"
+              New-Item -ItemType Directory -Force -Path $blobDir
 
-            # Search for MSI in temp dirs that the installer may have extracted
-            $msiFiles = Get-ChildItem "$env:TEMP" -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue
-            Write-Host "Found MSI files in temp:"
-            $msiFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+              # Try 7z on the blob
+              & 7z x "$($blob.FullName)" -o"$blobDir" -y 2>&1 | Select-Object -Last 10
 
-            foreach ($msi in $msiFiles) {
-              Write-Host "Extracting MSI: $($msi.Name)..."
-              Start-Process msiexec -ArgumentList "/a", "`"$($msi.FullName)`"", "/qn", "TARGETDIR=`"$adminDir\$($msi.BaseName)`"" -Wait -NoNewWindow
+              # Also try dark.exe (WiX toolset) if available
+              # List what we got
+              Write-Host "Blob contents:"
+              Get-ChildItem $blobDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 50 | ForEach-Object {
+                Write-Host "  $($_.FullName) ($($_.Length) bytes)"
+              }
+
+              $msiFiles = Get-ChildItem $blobDir -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue
             }
-
-            $extractDir = $adminDir
           }
 
-      - name: Find and collect SDK DLLs
+          # If still no MSIs, search all temp directories
+          if (-not $msiFiles) {
+            Write-Host "Searching all of TEMP for MSIs..."
+            $msiFiles = Get-ChildItem "$env:TEMP" -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue
+            $msiFiles | ForEach-Object { Write-Host "  $($_.FullName)" }
+          }
+
+          # List all files for debugging
+          if (-not $msiFiles) {
+            Write-Host "`nAll extracted files:"
+            Get-ChildItem $extractDir -Recurse -File | Select-Object -First 100 | ForEach-Object {
+              Write-Host "  $($_.FullName) ($($_.Length) bytes)"
+            }
+          }
+
+      - name: Launch installer briefly to extract MSIs
+        timeout-minutes: 10
         run: |
-          Write-Host "Searching for SketchUpAPI.dll..."
+          # Start the installer and let it extract MSIs to temp, then kill it
+          Write-Host "Starting installer to trigger MSI extraction..."
+          $proc = Start-Process -FilePath "$env:TEMP\SketchUp.exe" -PassThru
 
-          # Search in multiple locations
-          $searchPaths = @(
-            "$env:TEMP\su-extract",
-            "$env:TEMP\su-admin",
-            "C:\Program Files\SketchUp",
-            "C:\Program Files (x86)\SketchUp",
-            "$env:TEMP"
-          )
+          # Wait up to 5 minutes for MSI files to appear in temp
+          $found = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 5
+            $msiFiles = Get-ChildItem "$env:TEMP" -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 1MB }
+            if ($msiFiles) {
+              Write-Host "MSI files found after $($i * 5) seconds:"
+              $msiFiles | ForEach-Object { Write-Host "  $($_.FullName) ($([math]::Round($_.Length/1MB, 1)) MB)" }
+              $found = $true
+              break
+            }
+            Write-Host "  Waiting... ($($i * 5)s)"
+          }
 
+          # Kill the installer
+          if (-not $proc.HasExited) {
+            Write-Host "Killing installer process..."
+            $proc | Stop-Process -Force
+            # Also kill any child processes
+            Get-Process | Where-Object { $_.ProcessName -match "SketchUp|msiexec|InstallShield" } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+          if (-not $found) {
+            Write-Host "ERROR: No MSI files found in temp directory"
+            # List temp contents for debugging
+            Get-ChildItem "$env:TEMP" -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 100KB } |
+              Select-Object -First 50 |
+              ForEach-Object { Write-Host "  $($_.FullName) ($([math]::Round($_.Length/1MB, 2)) MB)" }
+          }
+
+      - name: Extract MSIs and find SDK DLLs
+        run: |
+          $adminDir = "$env:TEMP\su-admin"
+          New-Item -ItemType Directory -Force -Path $adminDir
+
+          # Find all MSI files
+          $msiFiles = Get-ChildItem "$env:TEMP" -Recurse -Filter "*.msi" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -gt 1MB }
+
+          if (-not $msiFiles) {
+            Write-Host "No MSI files found. Searching for SketchUpAPI.dll directly..."
+            $apiDll = Get-ChildItem "$env:TEMP" -Recurse -Filter "SketchUpAPI.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($apiDll) {
+              Write-Host "Found directly: $($apiDll.FullName)"
+            } else {
+              Write-Host "ERROR: Cannot find SketchUpAPI.dll anywhere"
+              exit 1
+            }
+          }
+
+          foreach ($msi in $msiFiles) {
+            $target = "$adminDir\$($msi.BaseName)"
+            Write-Host "Extracting: $($msi.Name) -> $target"
+            Start-Process msiexec -ArgumentList "/a", "`"$($msi.FullName)`"", "/qn", "TARGETDIR=`"$target`"" -Wait -NoNewWindow
+          }
+
+          # Find SketchUpAPI.dll
+          Write-Host "`nSearching for SketchUpAPI.dll..."
+          $searchPaths = @("$adminDir", "$env:TEMP\su-7z", "$env:TEMP\su-blob", "$env:TEMP")
           $apiDll = $null
+
           foreach ($path in $searchPaths) {
             if (Test-Path $path) {
               $found = Get-ChildItem $path -Recurse -Filter "SketchUpAPI.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
               if ($found) {
                 $apiDll = $found
-                Write-Host "Found SketchUpAPI.dll at: $($found.FullName)"
+                Write-Host "Found: $($found.FullName)"
                 break
               }
             }
           }
 
           if (-not $apiDll) {
-            Write-Host "ERROR: SketchUpAPI.dll not found!"
-            # List all DLLs we can find for debugging
+            Write-Host "ERROR: SketchUpAPI.dll not found after extraction"
+            # Debug: list all DLLs
             foreach ($path in $searchPaths) {
               if (Test-Path $path) {
-                Write-Host "`nDLLs in ${path}:"
-                Get-ChildItem $path -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue | Select-Object -First 50 | ForEach-Object {
-                  Write-Host "  $($_.FullName)"
+                $dlls = Get-ChildItem $path -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue | Select-Object -First 30
+                if ($dlls) {
+                  Write-Host "`nDLLs in ${path}:"
+                  $dlls | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
                 }
               }
             }
@@ -97,11 +167,8 @@ jobs:
           }
 
           $sdkDir = $apiDll.DirectoryName
-          Write-Host "SDK directory: $sdkDir"
-
           New-Item -ItemType Directory -Force -Path "sdk"
 
-          # Copy all DLLs from the same directory as SketchUpAPI.dll
           Get-ChildItem $sdkDir -Filter "*.dll" | ForEach-Object {
             Write-Host "Copying: $($_.Name) ($($_.Length) bytes)"
             Copy-Item $_.FullName "sdk\"
