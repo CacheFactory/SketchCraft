@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <math.h>
 
 // ─── Platform-specific path helpers ─────────────────────────────
 
@@ -72,7 +73,8 @@ typedef unsigned char SUByte;
 typedef struct { SUByte red, green, blue, alpha; } SUColor;
 typedef struct { double x, y, z; } SUPoint3D;
 typedef struct { double values[16]; } SUTransformation;
-typedef struct { double x, y, z, w; } SUUVQ;
+typedef struct { double x, y, z; } SUVector3D;
+typedef struct { double u, v, q; } SUUVQ;
 
 // ─── API function declarations ──────────────────────────────────
 
@@ -108,6 +110,7 @@ SU_API SUResult SUFaceGetInnerLoops(SUFaceRef face, size_t len, SULoopRef *loops
 SU_API SUResult SUFaceGetFrontMaterial(SUFaceRef face, SUMaterialRef *material);
 SU_API SUResult SUFaceGetBackMaterial(SUFaceRef face, SUMaterialRef *material);
 SU_API SUResult SUFaceGetUVHelper(SUFaceRef face, int front, int back, SUTextureWriterRef tw, SUUVHelperRef *uvh);
+SU_API SUResult SUFaceGetNormal(SUFaceRef face, SUVector3D *normal);
 
 SU_API SUResult SULoopGetNumVertices(SULoopRef loop, size_t *count);
 SU_API SUResult SULoopGetVertices(SULoopRef loop, size_t len, SUVertexRef *vertices, size_t *count);
@@ -137,6 +140,7 @@ SU_API SUResult SUMaterialGetColorizeType(SUMaterialRef material, int *type);
 
 SU_API SUResult SUTextureGetFileName(SUTextureRef texture, SUStringRef *file_name);
 SU_API SUResult SUTextureWriteToFile(SUTextureRef texture, const char *file_path);
+SU_API SUResult SUTextureGetDimensions(SUTextureRef texture, size_t *width, size_t *height, double *s_scale, double *t_scale);
 
 SU_API SUResult SUStringCreate(SUStringRef *out_string_ref);
 SU_API SUResult SUStringRelease(SUStringRef *string_ref);
@@ -170,6 +174,9 @@ static char g_mtl_name[256] = "";
 static struct {
     char name[256];
     int written;
+    int has_texture;
+    double tex_s_scale;  // texture width in inches
+    double tex_t_scale;  // texture height in inches
 } g_materials[MAX_MATERIALS];
 static int g_num_materials = 0;
 static int g_group_counter = 0;
@@ -182,6 +189,10 @@ static int g_faces_with_back_mat = 0;
 static int g_faces_with_inherited_mat = 0;
 static int g_faces_with_default_mat = 0;
 static int g_instances_with_mat = 0;
+static int g_uvhelper_ok = 0;
+static int g_uvhelper_fail = 0;
+static int g_procedural_uv = 0;
+static SUTextureWriterRef g_texture_writer = SU_INVALID;
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -224,6 +235,19 @@ static void multiply_transforms(SUTransformation *out, SUTransformation *a, SUTr
             }
         }
     }
+}
+
+// ─── Look up texture scale for a material name ─────────────────
+
+static int get_material_texture_scale(const char *name, double *s_scale, double *t_scale) {
+    for (int i = 0; i < g_num_materials; i++) {
+        if (strcmp(g_materials[i].name, name) == 0 && g_materials[i].has_texture) {
+            *s_scale = g_materials[i].tex_s_scale;
+            *t_scale = g_materials[i].tex_t_scale;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 // ─── Get material name from a face ──────────────────────────────
@@ -350,16 +374,41 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, c
 
         // Get UVs via UVHelper if face has a texture
         int has_uvs = 0;
+        int procedural_uvs = 0;
+        double tex_s = 1.0, tex_t = 1.0;
         SUUVHelperRef uvh = SU_INVALID;
         SUMaterialRef face_mat = SU_INVALID;
         SUTextureRef face_tex = SU_INVALID;
         if (SUFaceGetFrontMaterial(face, &face_mat) == SU_ERROR_NONE && !SUIsInvalid(face_mat)) {
             if (SUMaterialGetTexture(face_mat, &face_tex) == SU_ERROR_NONE && !SUIsInvalid(face_tex)) {
-                SUTextureWriterRef tw = SU_INVALID;
-                if (SUFaceGetUVHelper(face, 1, 0, tw, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
-                    has_uvs = 1;
+                SUResult uvh_res = SUFaceGetUVHelper(face, 1, 0, g_texture_writer, &uvh);
+                if (uvh_res == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
+                    // Verify UVs are valid by checking first vertex
+                    SUUVQ test_uvq = {0, 0, 0};
+                    SUPoint3D test_pt;
+                    SUVertexGetPosition(verts[0], &test_pt);
+                    SUResult uv_res = SUUVHelperGetFrontUVQ(uvh, &test_pt, &test_uvq);
+                    if (uv_res == SU_ERROR_NONE && test_uvq.q != 0.0) {
+                        has_uvs = 1;
+                        g_uvhelper_ok++;
+                    } else {
+                        if (g_uvhelper_fail < 3) {
+                            fprintf(stderr, "[skp2obj] UVHelper fail: res=%d u=%.6f v=%.6f q=%.6f pt=(%.1f,%.1f,%.1f)\n",
+                                    uv_res, test_uvq.u, test_uvq.v, test_uvq.q,
+                                    test_pt.x, test_pt.y, test_pt.z);
+                        }
+                        g_uvhelper_fail++;
+                        SUUVHelperRelease(&uvh);
+                        uvh = SU_INVALID;
+                    }
                 }
             }
+        }
+        // Fallback: if material has a texture but UV helper failed, generate procedural UVs
+        if (!has_uvs && matName && get_material_texture_scale(matName, &tex_s, &tex_t)) {
+            procedural_uvs = 1;
+            has_uvs = 1;
+            g_procedural_uv++;
         }
 
         // Write vertices and UVs
@@ -368,12 +417,39 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, c
             SUVertexGetPosition(verts[i], &pos);
             apply_transform(&pos, transform);
 
-            if (has_uvs) {
-                SUUVQ uvq = {0, 0, 0, 0};
+            if (procedural_uvs) {
+                // Project world position onto texture plane
+                // tex_s/tex_t = physical size in meters (pixels × meters/pixel from API)
+                // pos is in inches, convert to meters for consistent units
+                double wx = pos.x * 0.0254, wy = pos.y * 0.0254, wz = pos.z * 0.0254;
+                double ts_m = tex_s * 0.0254, tt_m = tex_t * 0.0254;  // inches to meters
+                if (ts_m <= 0) ts_m = 1.0;
+                if (tt_m <= 0) tt_m = 1.0;
+                SUVector3D norm;
+                SUFaceGetNormal(face, &norm);
+                double ay = fabs(norm.y);
+                double u, v;
+                if (ay > 0.7) {
+                    // Mostly horizontal (floor/ceiling) — project XZ
+                    u = wx / ts_m;
+                    v = wz / tt_m;
+                } else {
+                    // Vertical/angled surface — V always maps to Y (gravity-aligned)
+                    // U = horizontal tangent: cross(normal, Y_up) = (norm.z, 0, -norm.x)
+                    double tx = norm.z, tz = -norm.x;
+                    double tlen = sqrt(tx * tx + tz * tz);
+                    if (tlen < 0.001) { tx = 1; tz = 0; tlen = 1; }
+                    tx /= tlen; tz /= tlen;
+                    u = (wx * tx + wz * tz) / ts_m;
+                    v = wy / tt_m;
+                }
+                fprintf(out, "vt %.6f %.6f\n", u, v);
+            } else if (has_uvs) {
+                SUUVQ uvq = {0, 0, 0};
                 SUPoint3D sample_pt;
                 SUVertexGetPosition(verts[i], &sample_pt);
-                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
-                    fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.q != 0.0) {
+                    fprintf(out, "vt %.6f %.6f\n", uvq.u / uvq.q, uvq.v / uvq.q);
                 } else {
                     fprintf(out, "vt 0 0\n");
                 }
@@ -422,17 +498,38 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, c
         }
 
         int has_uvs = 0;
+        int procedural_uvs = 0;
+        double tex_s = 1.0, tex_t = 1.0;
         SUUVHelperRef uvh = SU_INVALID;
         SUMaterialRef face_mat = SU_INVALID;
         SUTextureRef face_tex = SU_INVALID;
         if (SUFaceGetFrontMaterial(face, &face_mat) == SU_ERROR_NONE && !SUIsInvalid(face_mat)) {
             if (SUMaterialGetTexture(face_mat, &face_tex) == SU_ERROR_NONE && !SUIsInvalid(face_tex)) {
-                SUTextureWriterRef tw = SU_INVALID;
-                if (SUFaceGetUVHelper(face, 1, 0, tw, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
-                    has_uvs = 1;
+                if (SUFaceGetUVHelper(face, 1, 0, g_texture_writer, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
+                    // Verify UVs by checking first outer loop vertex
+                    SUVertexRef *outer_verts_check = (SUVertexRef *)malloc(outer_count * sizeof(SUVertexRef));
+                    SULoopGetVertices(outer, outer_count, outer_verts_check, &outer_count);
+                    SUUVQ test_uvq = {0, 0, 0};
+                    SUPoint3D test_pt;
+                    SUVertexGetPosition(outer_verts_check[0], &test_pt);
+                    if (SUUVHelperGetFrontUVQ(uvh, &test_pt, &test_uvq) == SU_ERROR_NONE && test_uvq.q != 0.0) {
+                        has_uvs = 1;
+                    } else {
+                        SUUVHelperRelease(&uvh);
+                        uvh = SU_INVALID;
+                    }
+                    free(outer_verts_check);
                 }
             }
         }
+        if (!has_uvs && matName && get_material_texture_scale(matName, &tex_s, &tex_t)) {
+            procedural_uvs = 1;
+            has_uvs = 1;
+        }
+
+        // Helper: compute procedural UV for a vertex position
+        SUVector3D face_norm;
+        if (procedural_uvs) SUFaceGetNormal(face, &face_norm);
 
         // Write outer loop vertices
         SUVertexRef *verts = (SUVertexRef *)malloc(outer_count * sizeof(SUVertexRef));
@@ -441,12 +538,30 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, c
             SUPoint3D pos;
             SUVertexGetPosition(verts[i], &pos);
             apply_transform(&pos, transform);
-            if (has_uvs) {
-                SUUVQ uvq = {0, 0, 0, 0};
+            if (procedural_uvs) {
+                double wx = pos.x * 0.0254, wy = pos.y * 0.0254, wz = pos.z * 0.0254;
+                double ts_m = tex_s * 0.0254, tt_m = tex_t * 0.0254;  // inches to meters
+                if (ts_m <= 0) ts_m = 1.0;
+                if (tt_m <= 0) tt_m = 1.0;
+                double ay_fn = fabs(face_norm.y);
+                double u, v;
+                if (ay_fn > 0.7) {
+                    u = wx / ts_m; v = wz / tt_m;
+                } else {
+                    double tx = face_norm.z, tz = -face_norm.x;
+                    double tlen = sqrt(tx * tx + tz * tz);
+                    if (tlen < 0.001) { tx = 1; tz = 0; tlen = 1; }
+                    tx /= tlen; tz /= tlen;
+                    u = (wx * tx + wz * tz) / ts_m;
+                    v = wy / tt_m;
+                }
+                fprintf(out, "vt %.6f %.6f\n", u, v);
+            } else if (has_uvs) {
+                SUUVQ uvq = {0, 0, 0};
                 SUPoint3D sample_pt;
                 SUVertexGetPosition(verts[i], &sample_pt);
-                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
-                    fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.q != 0.0) {
+                    fprintf(out, "vt %.6f %.6f\n", uvq.u / uvq.q, uvq.v / uvq.q);
                 } else {
                     fprintf(out, "vt 0 0\n");
                 }
@@ -465,12 +580,33 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, c
                 SUPoint3D pos;
                 SUVertexGetPosition(verts[i], &pos);
                 apply_transform(&pos, transform);
-                if (has_uvs) {
-                    SUUVQ uvq = {0, 0, 0, 0};
+                if (procedural_uvs) {
+                    double wx = pos.x * 0.0254, wy = pos.y * 0.0254, wz = pos.z * 0.0254;
+                    double ts_m = tex_s * 0.0254, tt_m = tex_t * 0.0254;  // inches to meters
+                    if (ts_m <= 0) ts_m = 1.0;
+                    if (tt_m <= 0) tt_m = 1.0;
+                    double ay = fabs(face_norm.y);
+                    double u, v;
+                    if (ay > 0.7) {
+                        // Mostly horizontal (floor/ceiling) — project XZ
+                        u = wx / ts_m; v = wz / tt_m;
+                    } else {
+                        // Vertical/angled surface — V always maps to Y (gravity-aligned)
+                        // U = horizontal tangent: cross(normal, Y_up) = (norm.z, 0, -norm.x)
+                        double tx = face_norm.z, tz = -face_norm.x;
+                        double tlen = sqrt(tx * tx + tz * tz);
+                        if (tlen < 0.001) { tx = 1; tz = 0; tlen = 1; }
+                        tx /= tlen; tz /= tlen;
+                        u = (wx * tx + wz * tz) / ts_m;
+                        v = wy / tt_m;
+                    }
+                    fprintf(out, "vt %.6f %.6f\n", u, v);
+                } else if (has_uvs) {
+                    SUUVQ uvq = {0, 0, 0};
                     SUPoint3D sample_pt;
                     SUVertexGetPosition(verts[i], &sample_pt);
-                    if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
-                        fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                    if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.q != 0.0) {
+                        fprintf(out, "vt %.6f %.6f\n", uvq.u / uvq.q, uvq.v / uvq.q);
                     } else {
                         fprintf(out, "vt 0 0\n");
                     }
@@ -724,6 +860,33 @@ static void write_mtl(SUModelRef model, const char *mtl_path) {
                 fprintf(stderr, "[skp2obj] FAILED to write texture: %s (error %d, path: %s)\n",
                         tex_filename, tex_res, tex_path);
             }
+
+            // Record texture dimensions for procedural UV generation on inherited materials
+            // Find or create entry in g_materials[]
+            int mi = -1;
+            for (int j = 0; j < g_num_materials; j++) {
+                if (strcmp(g_materials[j].name, sanitized) == 0) { mi = j; break; }
+            }
+            if (mi < 0 && g_num_materials < MAX_MATERIALS) {
+                mi = g_num_materials++;
+                strncpy(g_materials[mi].name, sanitized, 255);
+                g_materials[mi].written = 0;
+            }
+            if (mi >= 0) {
+                g_materials[mi].has_texture = 1;
+                size_t tw = 0, th = 0;
+                double ss = 1.0, ts = 1.0;
+                if (SUTextureGetDimensions(tex, &tw, &th, &ss, &ts) == SU_ERROR_NONE && tw > 0 && th > 0 && ss > 0 && ts > 0) {
+                    // s_scale/t_scale = inches per pixel; physical size = pixels × scale
+                    g_materials[mi].tex_s_scale = (double)tw * ss;
+                    g_materials[mi].tex_t_scale = (double)th * ts;
+                } else {
+                    g_materials[mi].tex_s_scale = 24.0;  // default ~2ft
+                    g_materials[mi].tex_t_scale = 24.0;
+                }
+                fprintf(stderr, "[skp2obj] Material '%s' physical size: %.1f x %.1f inches\n",
+                        sanitized, g_materials[mi].tex_s_scale, g_materials[mi].tex_t_scale);
+            }
         }
 
         fprintf(mtl, "\n");
@@ -806,6 +969,9 @@ int main(int argc, char *argv[]) {
     fprintf(out, "# Converted from SketchUp by skp2obj\n");
     fprintf(out, "mtllib %s\n\n", g_mtl_name);
 
+    // Create texture writer for UV helper (needed to get per-face UVs)
+    SUTextureWriterCreate(&g_texture_writer);
+
     SUEntitiesRef entities = SU_INVALID;
     SUModelGetEntities(model, &entities);
     write_entities(out, entities, NULL, NULL, NULL);
@@ -815,9 +981,12 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "[skp2obj] Material stats: front=%d back=%d inherited=%d default=%d instances_with_mat=%d\n",
             g_faces_with_front_mat, g_faces_with_back_mat, g_faces_with_inherited_mat,
             g_faces_with_default_mat, g_instances_with_mat);
+    fprintf(stderr, "[skp2obj] UV stats: uvhelper_ok=%d uvhelper_fail=%d procedural=%d\n",
+            g_uvhelper_ok, g_uvhelper_fail, g_procedural_uv);
 
 done:
     if (out) fclose(out);
+    if (!SUIsInvalid(g_texture_writer)) SUTextureWriterRelease(&g_texture_writer);
     if (!SUIsInvalid(model)) SUModelRelease(&model);
     SUTerminate();
     return ret;

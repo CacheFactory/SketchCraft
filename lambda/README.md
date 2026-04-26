@@ -1,48 +1,44 @@
-# SKP Conversion Lambda
+# SKP Conversion Service
 
-Converts SketchUp (.skp) files to OBJ+MTL+textures using the SketchUp C API via Wine on AWS Lambda.
+Converts SketchUp (.skp) files to OBJ+MTL+textures using the SketchUp C API via Wine.
+
+**Runs on AWS App Runner** (not Lambda — Wine needs a full Linux kernel that Lambda's Firecracker micro-VM doesn't provide).
 
 ## Setup
 
 ### 1. Get the Windows SketchUp SDK
 
-You need `SketchUpAPI.dll` and its dependency DLLs from a Windows SketchUp installation.
+You need `SketchUpAPI.dll` and `SketchUpCommonPreferences.dll` from a Windows SketchUp installation.
 
 **Option A — From an existing Windows SketchUp installation:**
 ```
-Copy all DLLs from C:\Program Files\SketchUp\SketchUp 2026\ to lambda/sdk/
+Copy SketchUpAPI.dll and SketchUpCommonPreferences.dll from
+C:\Program Files\SketchUp\SketchUp 2026\ to lambda/sdk/
 ```
 
-**Option B — Extract from the installer on Windows:**
-```powershell
-# Download SketchUp installer
-Invoke-WebRequest -Uri "https://download.sketchup.com/SketchUpFull-2026-1-256-82.exe" -OutFile SketchUp.exe
-# Install to a temp directory or use 7z to extract
-7z x SketchUp.exe -oextracted
-# Find and copy SketchUpAPI.dll
-```
-
-**Option C — Use GitHub Actions** (see `.github/workflows/extract-sdk.yml`)
+**Option B — Use GitHub Actions** (see `.github/workflows/extract-sdk.yml`)
 
 ### 2. Build
 
 ```bash
-# Cross-compile skp2obj for Windows and build Docker image
+# Cross-compile skp2obj for Windows
 ./build.sh
+
+# Build Docker image (must target x86_64 for Wine)
+docker build --platform linux/amd64 -t skp-convert .
 ```
 
 ### 3. Deploy
 
 ```bash
-# Push to ECR and create/update Lambda
 ./deploy.sh
 ```
 
 ### 4. Configure the web app
 
-Set the Lambda Function URL in the web build:
+Set the service URL in the web build:
 ```bash
-export SKP_CONVERT_URL="https://xxxxx.lambda-url.us-east-1.on.aws/"
+export SKP_CONVERT_URL="https://xxxxx.us-east-1.awsapprunner.com"
 npm run build:web
 ```
 
@@ -50,9 +46,9 @@ npm run build:web
 
 ```
 Browser (draftdownapp.com)
-  │ POST (base64 SKP)
+  │ POST { file: base64, filename: "model.skp" }
   ▼
-Lambda Function URL
+App Runner (skp-convert)
   │ Wine + skp2obj_win.exe + SketchUpAPI.dll
   ▼
 ZIP response (OBJ + MTL + textures)
@@ -63,11 +59,22 @@ importOBJ({ rotateSkp: true })
 
 ## Local Testing
 
+**Note:** Testing on Apple Silicon requires QEMU emulation of x86_64, which causes Wine to segfault. Test on an x86_64 Linux machine or deploy to AWS.
+
+On an x86_64 machine:
 ```bash
-docker run -p 9000:8080 skp-convert-lambda
+docker build --platform linux/amd64 -t skp-convert .
+docker run -p 8080:8080 skp-convert
+
+# Health check
+curl http://localhost:8080/
 
 # Convert a file
-cat test.skp | base64 | \
-  curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" \
-    -d "{\"body\": \"{\\\"file\\\": \\\"$(cat)\\\", \\\"filename\\\": \\\"test.skp\\\"}\"}"
+cat test.skp | base64 -w0 | \
+  jq -Rn '{file: input, filename: "test.skp"}' | \
+  curl -XPOST http://localhost:8080/ -H "Content-Type: application/json" -d @- -o result.zip
 ```
+
+## Why Not Lambda?
+
+Wine uses Linux syscalls (`clone()`, `mmap()` with `MAP_FIXED`, etc.) that Lambda's Firecracker micro-VM kernel doesn't support. Even `wine cmd.exe /c "echo hello"` segfaults on Lambda. App Runner uses standard EC2 instances with a full kernel.

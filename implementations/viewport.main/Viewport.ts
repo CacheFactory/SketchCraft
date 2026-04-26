@@ -134,62 +134,40 @@ export class Viewport implements IViewport {
     this._raycaster.params.Points = { threshold };
     this._raycaster.setFromCamera(this._ndcVec, camera);
 
-    // Raycast main scene (faces) then overlay (edges).
-    // Use firstHitOnly on faces for early exit on large meshes.
+    // Raycast main scene (faces and edges are both in the main scene).
     const scene = this._webglRenderer.getScene();
-    const overlayScene = this._webglRenderer.getOverlayScene();
 
-    (this._raycaster as any).firstHitOnly = true;
-    const faceIntersects = this._raycaster.intersectObjects(scene.children, true);
     (this._raycaster as any).firstHitOnly = false;
-    const edgeIntersects = this._raycaster.intersectObjects(overlayScene.children, true);
+    const allIntersects = this._raycaster.intersectObjects(scene.children, true);
 
     const faceHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     const edgeHits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     const seenIds = new Set<string>();
 
-    // Process edge hits first (edges take priority for selection)
-    for (const hit of edgeIntersects) {
+    for (const hit of allIntersects) {
       let obj: THREE.Object3D | null = hit.object;
       while (obj) {
         if (obj.userData.entityId) {
           const eid = obj.userData.entityId as string;
           if (!seenIds.has(eid)) {
             seenIds.add(eid);
-            edgeHits.push({
+            const hitData = {
               entityId: eid,
               point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
               distance: hit.distance,
-            });
+            };
+            if (hit.object instanceof THREE.Line) {
+              edgeHits.push(hitData);
+            } else {
+              faceHits.push(hitData);
+            }
           }
           break;
         }
         obj = obj.parent;
       }
-      // Only need the closest edge hit
-      if (edgeHits.length > 0) break;
-    }
-
-    // Process face hits
-    for (const hit of faceIntersects) {
-      let obj: THREE.Object3D | null = hit.object;
-      while (obj) {
-        if (obj.userData.entityId) {
-          const eid = obj.userData.entityId as string;
-          if (!seenIds.has(eid)) {
-            seenIds.add(eid);
-            faceHits.push({
-              entityId: eid,
-              point: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
-              distance: hit.distance,
-            });
-          }
-          break;
-        }
-        obj = obj.parent;
-      }
-      // Only need the closest face hit
-      if (faceHits.length > 0) break;
+      // Stop early once we have at least one of each
+      if (edgeHits.length > 0 && faceHits.length > 0) break;
     }
 
     if (edgeHits.length > 0) {
@@ -198,7 +176,8 @@ export class Viewport implements IViewport {
     return faceHits;
   }
 
-  /** Lightweight raycast: edges only (overlay scene). Skip the expensive main scene traversal.
+  /** Lightweight raycast: edges only in the main scene.
+   *  Collects Line objects first to avoid raycasting face meshes.
    *  Use together with GPU pick for faces to get full coverage without blocking. */
   raycastEdgesOnly(
     screenX: number,
@@ -230,9 +209,15 @@ export class Viewport implements IViewport {
     this._raycaster.params.Points = { threshold };
     this._raycaster.setFromCamera(this._ndcVec, camera);
 
-    // Only raycast overlay scene (edges) — much fewer objects than main scene
-    const overlayScene = this._webglRenderer.getOverlayScene();
-    const edgeIntersects = this._raycaster.intersectObjects(overlayScene.children, true);
+    // Collect only edge Line objects from main scene to avoid raycasting face meshes
+    const scene = this._webglRenderer.getScene();
+    const edgeLines: THREE.Object3D[] = [];
+    for (const child of scene.children) {
+      if (child instanceof THREE.Line && child.userData.entityType === 'edge') {
+        edgeLines.push(child);
+      }
+    }
+    const edgeIntersects = this._raycaster.intersectObjects(edgeLines, false);
 
     const hits: Array<{ entityId: string; point: Vec3; distance: number }> = [];
     for (const hit of edgeIntersects) {

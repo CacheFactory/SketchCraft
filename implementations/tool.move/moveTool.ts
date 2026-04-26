@@ -180,5 +180,6 @@ export class MoveTool extends BaseTool {
         v.position.z = origPos.z + offset.z;
       }
     }
+    this._dirtyVertexIds = this.vertexIds;
   }
 }

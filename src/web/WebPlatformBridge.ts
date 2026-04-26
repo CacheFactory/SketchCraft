@@ -99,6 +99,7 @@ export class WebPlatformBridge implements WindowAPI {
       // Check SKP conversion cache first (for MTL/texture files)
       const filename = args.filePath.split('/').pop()?.split('\\').pop() || '';
       const cached = skpFileCache.get(filename);
+      console.log(`[file:read] path="${args.filePath}" → basename="${filename}" → ${cached ? `found (${cached.byteLength} bytes)` : `NOT found. Cache keys: [${Array.from(skpFileCache.keys()).join(', ')}]`}`);
       if (cached) return cached;
       // Not applicable on web otherwise
       return new ArrayBuffer(0);
@@ -188,7 +189,9 @@ export class WebPlatformBridge implements WindowAPI {
         let objName = 'output.obj';
         skpFileCache.clear();
 
+        console.log(`[SKP] ZIP contained ${files.size} files:`, Array.from(files.keys()));
         for (const [name, data] of files) {
+          console.log(`[SKP] ZIP file: "${name}" (${data.byteLength} bytes)`);
           if (name.endsWith('.obj')) {
             objData = data;
             objName = name;

@@ -219,16 +219,15 @@ export class ScaleTool extends BaseTool {
       if (!v) continue;
       const rel = vec3.sub(orig, anchor);
       if (axes) {
-        // Only scale along specified axes; others stay at original position
         v.position.x = axes.includes('x') ? anchor.x + rel.x * factor : orig.x;
         v.position.y = axes.includes('y') ? anchor.y + rel.y * factor : orig.y;
         v.position.z = axes.includes('z') ? anchor.z + rel.z * factor : orig.z;
       } else {
-        // Uniform scale on all axes
         const scaled = vec3.add(anchor, vec3.mul(rel, factor));
         v.position.x = scaled.x; v.position.y = scaled.y; v.position.z = scaled.z;
       }
     }
+    this._dirtyVertexIds = this.vertexIds;
   }
 
   // ── Bounding Box & Grips ──────────────────────────────

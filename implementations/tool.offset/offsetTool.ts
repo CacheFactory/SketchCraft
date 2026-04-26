@@ -163,6 +163,9 @@ export class OffsetTool extends BaseTool {
     // Delete original face (replaced by the offset ring + inner face)
     this.document.geometry.deleteFace(this.selectedFace.id);
 
+    // Mark new vertices as dirty for targeted sync
+    this._dirtyVertexIds = newVertexIds;
+
     this.commitTransaction(); this.reset();
     this.setStatus('Offset complete. Click a face to offset again.');
   }

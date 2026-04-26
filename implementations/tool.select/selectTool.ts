@@ -70,6 +70,18 @@ export class SelectTool extends BaseTool {
     this.lastClickTime = now;
 
     if (isDoubleClick && event.hitEntityId) {
+      // Double-click on a component → enter component editing mode
+      const sm = this.document.scene as any;
+      if (sm?.components?.has(event.hitEntityId)) {
+        sm.enterComponent(event.hitEntityId);
+        const comp = sm.components.get(event.hitEntityId);
+        this.document.selection.clear();
+        this.setStatus(`Editing component "${comp?.name ?? 'Component'}". Press Escape to exit.`);
+        this.setPhase('idle');
+        this.dragStart = null;
+        window.dispatchEvent(new CustomEvent('geometry-changed'));
+        return;
+      }
       const entity = this.document.scene.getEntity(event.hitEntityId);
       if (entity && (entity.type === 'group' || entity.type === 'component_instance')) {
         this.document.scene.enterGroup(event.hitEntityId);
@@ -255,7 +267,13 @@ export class SelectTool extends BaseTool {
 
   onKeyDown(event: ToolKeyEvent): void {
     if (event.key === 'Escape') {
-      if (this.document.scene.editingContext.activeGroupId) {
+      const sm = this.document.scene as any;
+      if (sm?.editingComponentId) {
+        sm.exitComponent();
+        this.document.selection.clear();
+        this.setStatus('Exited component editing.');
+        window.dispatchEvent(new CustomEvent('geometry-changed'));
+      } else if (this.document.scene.editingContext.activeGroupId) {
         this.document.scene.exitGroup();
         this.setStatus('Exited group editing.');
       } else {
@@ -268,6 +286,7 @@ export class SelectTool extends BaseTool {
       if (ids.length > 0) {
         this.beginTransaction('Delete');
         const geo = this.document.geometry;
+        const sm = this.document.scene as any;
         for (const id of ids) {
           // Delete dimensions (visual overlays)
           if (dimensionStore.isDimensionEntity(id)) {
@@ -279,6 +298,18 @@ export class SelectTool extends BaseTool {
               if (dim.sprite.parent) dim.sprite.parent.remove(dim.sprite);
               (dim.sprite.material as any).map?.dispose();
               dim.sprite.material.dispose();
+            }
+            continue;
+          }
+          // Delete component: delete all member geometry
+          if (sm?.components?.has(id)) {
+            const comp = sm.components.get(id);
+            if (comp) {
+              for (const eid of comp.entityIds) {
+                if (geo.getFace(eid)) geo.deleteFace(eid);
+                else if (geo.getEdge(eid)) geo.deleteEdge(eid);
+              }
+              sm.explodeComponent(id);
             }
             continue;
           }
@@ -323,6 +354,11 @@ export class SelectTool extends BaseTool {
 
   private getEntityTypeLabel(entityId: string): string {
     if (dimensionStore.isDimensionEntity(entityId)) return 'dimension';
+    const sm = this.document.scene as any;
+    if (sm?.components?.has(entityId)) {
+      const comp = sm.components.get(entityId);
+      return `component "${comp?.name ?? 'Component'}"`;
+    }
     if (this.document.geometry.getFace(entityId)) return 'face';
     if (this.document.geometry.getEdge(entityId)) return 'edge';
     const entity = this.document.scene.getEntity(entityId);

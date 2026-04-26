@@ -425,19 +425,52 @@ export class SceneManager implements ISceneManager {
     this.emitter.emit('changed');
   }
 
-  /** Get the component that contains this entity ID, or null. */
+  /** Get the component that contains this entity ID, or null.
+   *  Returns the outermost non-editing component (like SketchUp: first click
+   *  selects the top-level component, double-click enters it to reach children).
+   *  When editing a component, only returns child components within the editing scope. */
   getEntityComponent(entityId: string): string | null {
+    let result: string | null = null;
+    const editingComp = this.editingComponentId
+      ? this.components.get(this.editingComponentId) : null;
+
     for (const [compId, comp] of this.components) {
-      if (comp.entityIds.has(entityId)) return compId;
+      if (!comp.entityIds.has(entityId)) continue;
+      if (compId === this.editingComponentId) continue;
+
+      // When editing, only consider components fully contained within the editing component
+      if (editingComp) {
+        let isChild = comp.entityIds.size < editingComp.entityIds.size;
+        if (!isChild) continue;
+        // Verify it's actually a subset (spot check — full check too expensive)
+        let sample = true;
+        let checked = 0;
+        for (const eid of comp.entityIds) {
+          if (!editingComp.entityIds.has(eid)) { sample = false; break; }
+          if (++checked >= 10) break;
+        }
+        if (!sample) continue;
+      }
+
+      // Prefer the smallest (innermost) component — select the immediate
+      // component a face belongs to, not the entire model hierarchy
+      if (!result) {
+        result = compId;
+      } else {
+        const existing = this.components.get(result)!;
+        if (comp.entityIds.size < existing.entityIds.size) {
+          result = compId;
+        }
+      }
     }
-    return null;
+    return result;
   }
 
   /** Check if an entity is inside a component and NOT currently being edited. */
   isEntityProtected(entityId: string): boolean {
     const compId = this.getEntityComponent(entityId);
     if (!compId) return false; // Not in a component — freely editable
-    return compId !== this.editingComponentId; // Protected unless we're editing this component
+    return true; // getEntityComponent already excludes the editing component
   }
 
   /** Enter component editing mode. */
@@ -460,10 +493,11 @@ export class SceneManager implements ISceneManager {
 
   /** Get the entity IDs that are editable in the current context. */
   isEntityEditable(entityId: string): boolean {
-    // If editing a component, only that component's entities are editable
     if (this.editingComponentId) {
       const comp = this.components.get(this.editingComponentId);
-      return comp ? comp.entityIds.has(entityId) : false;
+      if (!comp || !comp.entityIds.has(entityId)) return false;
+      // Entity is in the editing component, but check if it's also in a child component
+      return !this.isEntityProtected(entityId);
     }
     // In main scene, entities NOT in any component are editable
     return !this.getEntityComponent(entityId);

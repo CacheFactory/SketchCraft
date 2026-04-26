@@ -49,6 +49,9 @@ export abstract class BaseTool implements ITool {
   /** Current drawing plane axis, changeable with arrow keys. */
   protected drawingPlaneAxis: DrawingPlaneAxis = 'ground';
 
+  /** Dirty vertex IDs from the last mutation — read by viewport for targeted sync. */
+  _dirtyVertexIds: string[] | null = null;
+
   constructor(document: IModelDocument, viewport: IViewport, inference: IInferenceEngine) {
     this.document = document;
     this.viewport = viewport;

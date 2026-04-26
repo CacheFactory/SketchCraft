@@ -66,6 +66,34 @@ function AppLayout() {
       if (isMeta && e.key === 'o') { e.preventDefault(); (app as any)?.openDocument(); return; }
       if (isMeta && e.key === 'n') { e.preventDefault(); (app as any)?.newDocument(); return; }
 
+      // Make Component (Cmd/Ctrl+G)
+      if (isMeta && e.key === 'g') {
+        e.preventDefault();
+        const sel = (app as any)?.document?.selection;
+        const sm = (app as any)?.document?.scene;
+        const geo = (app as any)?.document?.geometry;
+        if (sel && sm?.createComponent && geo) {
+          const ids = Array.from(sel.state.entityIds) as string[];
+          if (ids.length > 0) {
+            // Auto-include edges of selected faces
+            const allIds = new Set(ids);
+            for (const id of ids) {
+              if (geo.getFace(id)) {
+                const edges = geo.getFaceEdges(id);
+                for (const edge of edges) allIds.add(edge.id);
+              }
+            }
+            const compId = sm.createComponent('Component', Array.from(allIds));
+            sel.clear();
+            sel.add(compId);
+            (app as any)?.syncScene?.();
+            (app as any)?.syncSelection?.();
+            syncPreviews();
+          }
+        }
+        return;
+      }
+
       // Tool shortcuts (from preferences)
       const key = e.key.toLowerCase();
       if (!isMeta && !e.shiftKey && shortcutMap[key]) {
@@ -79,9 +107,25 @@ function AppLayout() {
         return;
       }
 
-      // Escape: clear selection and deactivate tool
+      // Escape: exit component/group editing, or clear selection and deactivate tool
       if (e.key === 'Escape') {
         e.preventDefault();
+        const sm = (app as any)?.document?.scene;
+        // If editing a component, let the tool handle exit and stop
+        if (sm?.editingComponentId) {
+          const tool = (app as any)?.toolManager?.getActiveTool();
+          if (tool) {
+            tool.onKeyDown({
+              key: e.key, code: e.code,
+              shiftKey: e.shiftKey, ctrlKey: e.ctrlKey || e.metaKey, altKey: e.altKey,
+            });
+          }
+          (app as any)?.syncScene?.();
+          (app as any)?.syncSelection?.();
+          syncPreviews();
+          syncToolState();
+          return;
+        }
         // Let active tool cancel in-progress operation
         const tool = (app as any)?.toolManager?.getActiveTool();
         if (tool) {

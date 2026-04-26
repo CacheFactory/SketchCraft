@@ -22,7 +22,7 @@ const faceItems: MenuItem[] = [
   { label: 'Reverse Face', action: 'reverse-face' },
   { label: 'Intersect Faces', action: 'intersect-faces', dividerAfter: true },
   { label: 'Make Group', action: 'make-group' },
-  { label: 'Make Component', action: 'make-component' },
+  { label: 'Make Component', action: 'make-component', shortcut: 'Ctrl+G' },
 ];
 
 const edgeItems: MenuItem[] = [
@@ -30,7 +30,8 @@ const edgeItems: MenuItem[] = [
   { label: 'Divide', action: 'divide', dividerAfter: true },
   { label: 'Weld Edges', action: 'weld' },
   { label: 'Hide', action: 'hide' },
-  { label: 'Soften', action: 'soften' },
+  { label: 'Soften', action: 'soften', dividerAfter: true },
+  { label: 'Make Component', action: 'make-component', shortcut: 'Ctrl+G' },
 ];
 
 const groupItems: MenuItem[] = [
@@ -40,6 +41,12 @@ const groupItems: MenuItem[] = [
   { label: 'Make Unique', action: 'make-unique' },
   { label: 'Lock', action: 'lock', dividerAfter: true },
   { label: 'Hide', action: 'hide' },
+];
+
+const componentItems: MenuItem[] = [
+  { label: 'Edit Component', action: 'edit-component', dividerAfter: true },
+  { label: 'Explode', action: 'explode-component' },
+  { label: 'Make Component', action: 'make-component', shortcut: 'Ctrl+G' },
 ];
 
 export function ContextMenu() {
@@ -75,10 +82,21 @@ export function ContextMenu() {
   const getMenuItems = (): MenuItem[] => {
     if (selectedCount === 0) return emptySpaceItems;
 
-    // Determine selection type
     if (app) {
+      const sm = app.document.scene as any;
+      // Check if the selected item is a component
+      if (sm?.components?.has(selectedEntityIds[0])) {
+        return componentItems;
+      }
+
       const entity = app.document.scene.getEntity(selectedEntityIds[0]);
-      if (!entity) return emptySpaceItems;
+      if (!entity) {
+        // Could be a geometry entity (face/edge) not in scene manager
+        const geo = app.document.geometry;
+        if (geo.getFace(selectedEntityIds[0])) return faceItems;
+        if (geo.getEdge(selectedEntityIds[0])) return edgeItems;
+        return emptySpaceItems;
+      }
 
       switch (entity.type) {
         case 'face': return faceItems;
@@ -94,9 +112,50 @@ export function ContextMenu() {
 
   const handleAction = useCallback((action: string) => {
     setVisible(false);
+    const sm = app?.document.scene as any;
     switch (action) {
       case 'select-all': app?.document.selection.selectAll(); break;
       case 'make-group': /* app.createGroupFromSelection() */ break;
+      case 'make-component': {
+        const geo = app?.document.geometry;
+        if (sm?.createComponent && geo) {
+          const ids = Array.from(app!.document.selection.state.entityIds) as string[];
+          if (ids.length > 0) {
+            // Auto-include edges of selected faces
+            const allIds = new Set(ids);
+            for (const id of ids) {
+              if (geo.getFace(id)) {
+                const edges = geo.getFaceEdges(id);
+                for (const edge of edges) allIds.add(edge.id);
+              }
+            }
+            const compId = sm.createComponent('Component', Array.from(allIds));
+            app!.document.selection.clear();
+            app!.document.selection.add(compId);
+            (app as any)?.syncScene?.();
+            (app as any)?.syncSelection?.();
+          }
+        }
+        break;
+      }
+      case 'edit-component': {
+        if (sm?.enterComponent && selectedEntityIds.length > 0) {
+          sm.enterComponent(selectedEntityIds[0]);
+          app!.document.selection.clear();
+          (app as any)?.syncScene?.();
+          window.dispatchEvent(new CustomEvent('geometry-changed'));
+        }
+        break;
+      }
+      case 'explode-component': {
+        if (sm?.explodeComponent && selectedEntityIds.length > 0) {
+          sm.explodeComponent(selectedEntityIds[0]);
+          app!.document.selection.clear();
+          (app as any)?.syncScene?.();
+          (app as any)?.syncSelection?.();
+        }
+        break;
+      }
       case 'explode': /* app.explodeSelection() */ break;
       case 'hide':
         selectedEntityIds.forEach(id => {

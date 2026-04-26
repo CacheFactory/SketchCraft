@@ -296,6 +296,7 @@ export class RotateTool extends BaseTool {
       const fin = vec3.add(this.center, rot);
       v.position.x = fin.x; v.position.y = fin.y; v.position.z = fin.z;
     }
+    this._dirtyVertexIds = this.vertexIds;
   }
 
   // ── Bounding box ──────────────────────────────────────

@@ -5,16 +5,52 @@
 import os
 import json
 import base64
+import shutil
 import subprocess
 import tempfile
 import zipfile
 import io
 import time
 
+_wine_initialized = False
+
+def _ensure_wine():
+    """Initialize Wine prefix and copy binaries on cold start."""
+    global _wine_initialized
+    if _wine_initialized:
+        return
+
+    env = _wine_env()
+
+    # Copy exe + DLLs to a working directory under /tmp
+    skp2obj_dir = '/tmp/skp2obj'
+    os.makedirs(skp2obj_dir, exist_ok=True)
+    for f in os.listdir('/opt/skp2obj'):
+        src = os.path.join('/opt/skp2obj', f)
+        dst = os.path.join(skp2obj_dir, f)
+        if os.path.isfile(src) and not os.path.exists(dst):
+            shutil.copy2(src, dst)
+
+    # Initialize Wine prefix (creates registry, drive mappings)
+    subprocess.run(
+        ['wineboot', '--init'], env=env,
+        capture_output=True, timeout=60,
+    )
+    print('[skp-convert] Wine initialized')
+    _wine_initialized = True
+
+
+def _wine_env():
+    env = os.environ.copy()
+    env['WINEPREFIX'] = '/tmp/wine'
+    env['WINEDEBUG'] = '-all'
+    env['WINEARCH'] = 'win64'
+    return env
+
+
 def lambda_handler(event, context):
     """Convert SKP file to OBJ+MTL+textures."""
 
-    # Handle CORS preflight
     headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -37,6 +73,9 @@ def lambda_handler(event, context):
 
         print(f'[skp-convert] Received {len(skp_data)} bytes: {filename}')
 
+        # Ensure Wine is ready
+        _ensure_wine()
+
         # Write SKP to temp file
         work_dir = tempfile.mkdtemp(dir='/tmp')
         skp_path = os.path.join(work_dir, 'input.skp')
@@ -45,31 +84,27 @@ def lambda_handler(event, context):
         with open(skp_path, 'wb') as f:
             f.write(skp_data)
 
-        # Run conversion via Wine
-        skp2obj_path = '/opt/skp2obj/skp2obj_win.exe'
-        env = os.environ.copy()
-        env['WINEPREFIX'] = '/tmp/wine'
-        env['WINEDEBUG'] = '-all'  # Suppress Wine debug output
+        env = _wine_env()
 
-        # Convert Windows paths for Wine
-        wine_skp = subprocess.check_output(
-            ['winepath', '-w', skp_path], env=env, text=True
-        ).strip()
-        wine_obj = subprocess.check_output(
-            ['winepath', '-w', obj_path], env=env, text=True
-        ).strip()
+        # Wine maps Linux / to Z:\ — construct Windows paths directly
+        wine_skp = 'Z:' + skp_path.replace('/', '\\')
+        wine_obj = 'Z:' + obj_path.replace('/', '\\')
+        wine_exe = 'Z:\\tmp\\skp2obj\\skp2obj_win.exe'
 
         start = time.time()
         result = subprocess.run(
-            ['wine64', skp2obj_path, wine_skp, wine_obj],
+            ['wine64', wine_exe, wine_skp, wine_obj],
             env=env,
             capture_output=True,
             text=True,
             timeout=240,
+            cwd='/tmp/skp2obj',  # Working dir = where the DLLs are
         )
         elapsed = time.time() - start
 
         print(f'[skp-convert] Wine exit={result.returncode} in {elapsed:.1f}s')
+        if result.stdout:
+            print(f'[skp-convert] stdout: {result.stdout[:500]}')
         if result.stderr:
             print(f'[skp-convert] stderr: {result.stderr[:500]}')
 
@@ -79,7 +114,7 @@ def lambda_handler(event, context):
                 'headers': headers,
                 'body': json.dumps({
                     'error': 'Conversion failed',
-                    'details': result.stderr[:500],
+                    'details': result.stderr[:500] or result.stdout[:500],
                 }),
             }
 
@@ -106,7 +141,6 @@ def lambda_handler(event, context):
         zip_data = zip_buffer.getvalue()
         print(f'[skp-convert] ZIP size: {len(zip_data)} bytes')
 
-        # Return ZIP as base64
         return {
             'statusCode': 200,
             'headers': {

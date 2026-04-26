@@ -1,55 +1,54 @@
-# Lambda container image for SKP-to-OBJ conversion.
-# Uses Wine to run Windows SketchUp SDK (SketchUpAPI.dll) on Linux.
+# Container for SKP-to-OBJ conversion via Wine.
+# Wine needs a full Linux kernel — use Fargate or App Runner, NOT Lambda.
 #
-# Build: docker build -t skp-convert-lambda .
-# Test:  docker run -p 9000:8080 skp-convert-lambda
-#        curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" \
-#          -d '{"body": "{\"file\": \"<base64-skp>\", \"filename\": \"test.skp\"}"}'
+# Build: docker build --platform linux/amd64 -t skp-convert .
+# Test:  docker run --platform linux/amd64 -p 8080:8080 skp-convert
 
-FROM public.ecr.aws/lambda/python:3.12
+FROM debian:bookworm-slim
 
-# Install Wine from Amazon Linux extras / RPM
-RUN dnf install -y \
+# Install Wine from Debian repos (well-tested, proper packaging)
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    ca-certificates \
+    wine \
+    wine64 \
     wget \
     cabextract \
-    xorg-x11-server-Xvfb \
-    && dnf clean all
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Wine from WineHQ or build from source
-# Using Wine from Fedora COPR for Amazon Linux 2023 compatibility
-RUN dnf install -y \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
-    && dnf install -y wine wine-core wine-common \
-    || true
-
-# If Wine isn't available from repos, use a pre-built static Wine
-# Fallback: download a portable Wine build
-RUN if ! command -v wine64 &> /dev/null; then \
-    echo "Wine not found in repos, installing portable Wine..." && \
-    mkdir -p /opt/wine && \
-    wget -q "https://github.com/AdelKS/LinuxPortableWine/releases/download/v10.0/wine-v10.0-x86_64.tar.xz" \
-      -O /tmp/wine.tar.xz && \
-    tar -xf /tmp/wine.tar.xz -C /opt/wine --strip-components=1 && \
-    rm /tmp/wine.tar.xz && \
-    ln -sf /opt/wine/bin/wine64 /usr/local/bin/wine64 && \
-    ln -sf /opt/wine/bin/winepath /usr/local/bin/winepath; \
-    fi
-
-# Create Wine prefix (headless — no display needed)
-ENV WINEPREFIX=/tmp/wine
+# Wine environment (headless)
 ENV WINEDEBUG=-all
-ENV DISPLAY=:99
+ENV WINEARCH=win64
+ENV WINEPREFIX=/tmp/wine
+ENV PYTHONUNBUFFERED=1
+ENV DISPLAY=
 
-# Copy skp2obj Windows binary and SketchUp SDK DLLs
+# Copy skp2obj binary and SDK DLLs
 COPY skp2obj_win.exe /opt/skp2obj/skp2obj_win.exe
 COPY sdk/ /opt/skp2obj/
 
-# Ensure DLLs are on the Wine path
-RUN mkdir -p /tmp/wine/drive_c/skp2obj && \
-    cp /opt/skp2obj/*.dll /tmp/wine/drive_c/skp2obj/ 2>/dev/null || true && \
-    cp /opt/skp2obj/*.exe /tmp/wine/drive_c/skp2obj/ 2>/dev/null || true
+# Download MSVC 2022 runtime DLLs (needed by SketchUpAPI.dll)
+# vc_redist.x64.exe contains nested .cab files; DLLs have _amd64 suffix
+RUN cd /tmp && \
+    wget -q "https://aka.ms/vs/17/release/vc_redist.x64.exe" -O vcredist.exe && \
+    cabextract -q vcredist.exe && \
+    mkdir -p dlls && \
+    for f in a*; do cabextract -q -d dlls "$f" 2>/dev/null || true; done && \
+    for dll in msvcp140 msvcp140_1 msvcp140_2 msvcp140_codecvt_ids \
+               vcruntime140 vcruntime140_1 concrt140; do \
+      src="dlls/${dll}.dll_amd64"; \
+      if [ -f "$src" ]; then \
+        cp "$src" "/opt/skp2obj/${dll}.dll"; \
+        echo "  Installed: ${dll}.dll"; \
+      fi; \
+    done && \
+    echo "SDK contents:" && ls /opt/skp2obj/ && \
+    rm -rf /tmp/*
 
-# Copy handler
-COPY handler.py ${LAMBDA_TASK_ROOT}/
+# Copy server
+COPY server.py /app/server.py
 
-CMD ["handler.lambda_handler"]
+EXPOSE 8080
+CMD ["python3", "/app/server.py"]

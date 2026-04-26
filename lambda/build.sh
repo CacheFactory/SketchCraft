@@ -44,6 +44,7 @@ EXPORTS
     SUFaceGetInnerLoops
     SUFaceGetFrontMaterial
     SUFaceGetUVHelper
+    SUFaceGetNormal
     SULoopGetNumVertices
     SULoopGetVertices
     SUVertexGetPosition
@@ -63,6 +64,7 @@ EXPORTS
     SUMaterialGetColorizeType
     SUTextureGetFileName
     SUTextureWriteToFile
+    SUTextureGetDimensions
     SUStringCreate
     SUStringRelease
     SUStringGetUTF8Length
@@ -119,7 +121,7 @@ ls -la sdk/*.dll 2>/dev/null || true
 
 echo "=== Step 4: Build Docker image ==="
 
-docker build -t skp-convert-lambda .
+docker build --platform linux/amd64 -t skp-convert-lambda .
 
 echo ""
 echo "=== Build complete ==="

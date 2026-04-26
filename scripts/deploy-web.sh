@@ -12,6 +12,7 @@ DIST_DIR="$PROJECT_DIR/dist/web"
 
 echo "==> Building web version..."
 cd "$PROJECT_DIR"
+export SKP_CONVERT_URL="https://hzmbrm9pw6.us-east-1.awsapprunner.com"
 npm run build:web
 
 echo "==> Checking S3 bucket..."

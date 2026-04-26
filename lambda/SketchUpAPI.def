@@ -22,6 +22,7 @@ EXPORTS
     SUFaceGetInnerLoops
     SUFaceGetFrontMaterial
     SUFaceGetUVHelper
+    SUFaceGetNormal
     SULoopGetNumVertices
     SULoopGetVertices
     SUVertexGetPosition
@@ -32,12 +33,16 @@ EXPORTS
     SUComponentInstanceGetTransform
     SUComponentInstanceGetDefinition
     SUComponentDefinitionGetEntities
+    SUComponentDefinitionGetName
+    SUComponentInstanceGetName
+    SUGroupGetName
     SUMaterialGetName
     SUMaterialGetColor
     SUMaterialGetTexture
     SUMaterialGetColorizeType
     SUTextureGetFileName
     SUTextureWriteToFile
+    SUTextureGetDimensions
     SUStringCreate
     SUStringRelease
     SUStringGetUTF8Length
@@ -46,3 +51,14 @@ EXPORTS
     SUUVHelperGetFrontUVQ
     SUTextureWriterCreate
     SUTextureWriterRelease
+    SUComponentInstanceToDrawingElement
+    SUDrawingElementGetMaterial
+    SUFaceGetBackMaterial
+    SUMeshHelperCreate
+    SUMeshHelperRelease
+    SUMeshHelperGetNumTriangles
+    SUMeshHelperGetNumVertices
+    SUMeshHelperGetVertices
+    SUMeshHelperGetVertexIndices
+    SUMeshHelperGetNormals
+    SUMeshHelperGetFrontSTQCoords
