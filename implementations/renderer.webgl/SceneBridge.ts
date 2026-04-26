@@ -52,6 +52,11 @@ export class SceneBridge {
   // Face ID → triangle vertex range in the batched position buffer (for highlighting)
   private _batchedFaceTriRange = new Map<string, { start: number; count: number }>();
   private _batchedPositionBuffer: Float32Array | null = null;
+  // Active (non-batched) faces — extracted from batch or newly created.
+  // sync() only iterates these, never the full face map.
+  private _activeFaceIds = new Set<string>();
+  // Temporary highlight overlay for batched face selection
+  private _batchHighlight: THREE.Mesh | null = null;
 
   constructor(engine: IGeometryEngine, webglRenderer: WebGLRenderer) {
     this.engine = engine;
@@ -190,7 +195,7 @@ export class SceneBridge {
     this.faceGroups.clear();
 
     for (const [id, line] of this.edgeLines) {
-      this.overlayScene.remove(line);
+      this.scene.remove(line);
       line.geometry.dispose();
       this.webglRenderer.unregisterEntityObject(id);
     }
@@ -204,9 +209,9 @@ export class SceneBridge {
         if (child instanceof THREE.Mesh) child.geometry.dispose();
       });
     }
-    const oldEdgeBatch = this.overlayScene.getObjectByName('batched-edges');
+    const oldEdgeBatch = this.scene.getObjectByName('batched-edges');
     if (oldEdgeBatch) {
-      this.overlayScene.remove(oldEdgeBatch);
+      this.scene.remove(oldEdgeBatch);
       if (oldEdgeBatch instanceof THREE.LineSegments) oldEdgeBatch.geometry.dispose();
     }
 
@@ -247,7 +252,9 @@ export class SceneBridge {
         const dx = v.position.x - p0.x, dy = v.position.y - p0.y, dz = v.position.z - p0.z;
         flat2d.push(dx * eux + dy * euy + dz * euz, dx * evx + dy * evy + dz * evz);
       }
-      let indices = Earcut.triangulate(flat2d, undefined, 2);
+      const holeIndices = face.holeStartIndices && face.holeStartIndices.length > 0
+        ? face.holeStartIndices : undefined;
+      let indices = Earcut.triangulate(flat2d, holeIndices, 2);
       if (indices.length === 0) {
         indices = [];
         for (let i = 1; i < verts.length - 1; i++) indices.push(0, i, i + 1);
@@ -455,7 +462,7 @@ export class SceneBridge {
       edgeBatch.name = 'batched-edges';
       edgeBatch.frustumCulled = false;
       edgeBatch.raycast = () => {}; // Disable raycast on batched edges (too expensive)
-      this.overlayScene.add(edgeBatch);
+      this.scene.add(edgeBatch);
     } else {
       console.log(`[syncBatched] Skipping ${edgeCount} edges (exceeds ${MAX_BATCHED_EDGES} limit — faces-only mode)`);
     }
@@ -485,6 +492,77 @@ export class SceneBridge {
     return this._batchedFaceIds.has(faceId);
   }
 
+  /** Check if an edge ID is part of the batched mesh. */
+  isBatchedEdge(edgeId: string): boolean {
+    return this._batchedEdgeIds.has(edgeId);
+  }
+
+  /** Check if batched mode is active. */
+  get batchedMode(): boolean {
+    return this._batchedMode;
+  }
+
+  /** Extract a face from the batch into a normal per-face mesh.
+   *  NaN-masks the face's triangles in the batch buffer and creates a regular
+   *  Three.js mesh so tools can interact with it normally.
+   */
+  extractFromBatch(faceId: string): void {
+    if (!this._batchedFaceIds.has(faceId) || !this._batchedPositionBuffer) return;
+
+    const batchMesh = this.scene.getObjectByName('batched-faces') as THREE.Mesh | undefined;
+    if (!batchMesh) return;
+
+    const range = this._batchedFaceTriRange.get(faceId);
+    if (range) {
+      // NaN-mask the face's triangles in the batch buffer
+      const posBuffer = this._batchedPositionBuffer;
+      const posAttr = batchMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const normAttr = batchMesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+      const uvAttr = batchMesh.geometry.getAttribute('uv') as THREE.BufferAttribute;
+
+      for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
+        posBuffer[i] = NaN;
+      }
+      posAttr.needsUpdate = true;
+
+      if (normAttr) {
+        const normArr = normAttr.array as Float32Array;
+        for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) normArr[i] = NaN;
+        normAttr.needsUpdate = true;
+      }
+      if (uvAttr) {
+        const uvArr = uvAttr.array as Float32Array;
+        for (let i = range.start * 2; i < (range.start + range.count) * 2; i++) uvArr[i] = 0;
+        uvAttr.needsUpdate = true;
+      }
+    }
+
+    // Remove from batch tracking
+    this._batchedFaceIds.delete(faceId);
+    this._batchedFaceTriRange.delete(faceId);
+
+    // Create a normal per-face mesh
+    const face = this.engine.getMesh().faces.get(faceId);
+    if (face) {
+      this.syncFace(faceId, face);
+      this._activeFaceIds.add(faceId);
+      this.lastFaceGeneration.set(faceId, face.generation);
+    }
+  }
+
+  /** Extract an edge from the batch into a normal per-edge line.
+   *  Removes it from batch tracking so sync() will manage it normally.
+   */
+  extractEdgeFromBatch(edgeId: string): void {
+    if (!this._batchedEdgeIds.has(edgeId)) return;
+    this._batchedEdgeIds.delete(edgeId);
+
+    const edge = this.engine.getMesh().edges.get(edgeId);
+    if (edge) {
+      this.syncEdge(edgeId, edge);
+    }
+  }
+
   /** Full sync: rebuild Three.js scene from geometry engine state.
    *  @param force - If true, skip dirty tracking and rebuild everything (used after undo/redo).
    */
@@ -502,105 +580,132 @@ export class SceneBridge {
           if (child instanceof THREE.Mesh) child.geometry.dispose();
         });
       }
-      const oldEdgeBatch = this.overlayScene.getObjectByName('batched-edges');
+      const oldEdgeBatch = this.scene.getObjectByName('batched-edges');
       if (oldEdgeBatch) {
-        this.overlayScene.remove(oldEdgeBatch);
+        this.scene.remove(oldEdgeBatch);
         if (oldEdgeBatch instanceof THREE.LineSegments) oldEdgeBatch.geometry.dispose();
+      }
+    }
+
+    // In batched mode, handle deleted/restored batched faces via buffer patching
+    if (this._batchedMode && this._batchedPositionBuffer) {
+      const batchMesh = this.scene.getObjectByName('batched-faces') as THREE.Mesh | undefined;
+      if (batchMesh) {
+        const posBuffer = this._batchedPositionBuffer;
+        const posAttr = batchMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const normAttr = batchMesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
+        const uvAttr = batchMesh.geometry.getAttribute('uv') as THREE.BufferAttribute;
+        let bufferDirty = false;
+
+        // Detect deleted batched faces — NaN-mask their triangles
+        const deletedBatchedFaces: string[] = [];
+        for (const id of this._batchedFaceIds) {
+          if (!mesh.faces.has(id)) deletedBatchedFaces.push(id);
+        }
+        for (const id of deletedBatchedFaces) {
+          const range = this._batchedFaceTriRange.get(id);
+          if (range) {
+            for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
+              posBuffer[i] = NaN;
+            }
+            if (normAttr) {
+              const normArr = normAttr.array as Float32Array;
+              for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) normArr[i] = NaN;
+              normAttr.needsUpdate = true;
+            }
+            if (uvAttr) {
+              const uvArr = uvAttr.array as Float32Array;
+              for (let i = range.start * 2; i < (range.start + range.count) * 2; i++) uvArr[i] = 0;
+              uvAttr.needsUpdate = true;
+            }
+            bufferDirty = true;
+          }
+          this._batchedFaceIds.delete(id);
+          this._batchedFaceTriRange.delete(id);
+        }
+
+        if (bufferDirty) {
+          posAttr.needsUpdate = true;
+          console.log(`[sync] Removed ${deletedBatchedFaces.length} batched faces via NaN masking in ${(performance.now() - t0).toFixed(1)}ms`);
+        }
+      }
+
+      // Fast path: if no active (extracted/new) faces exist and no individual meshes,
+      // skip the iteration below entirely.
+      // Skip fast path on force=true (undo/redo) since faces may have been restored.
+      if (!force && this._activeFaceIds.size === 0 && this.faceGroups.size === 0 && this.edgeLines.size === 0) {
+        this.syncComponentBoxes(mesh);
+        console.log(`[SceneBridge.sync] ${(performance.now() - t0).toFixed(1)}ms (batched fast path), faces: ${mesh.faces.size}`);
+        return;
       }
     }
 
     const liveFaceIds = new Set<string>();
     const liveEdgeIds = new Set<string>();
 
-    // Build vertex position snapshot only for non-batched vertices (skip batched to save time)
-    const currentVertexPositions = new Map<string, string>();
+    // In batched mode, detect new/restored faces not yet tracked
     if (this._batchedMode) {
-      // Only snapshot vertices that belong to new (non-batched) geometry
-      const newVertexIds = new Set<string>();
-      mesh.faces.forEach((face, id) => {
-        if (!this._batchedFaceIds.has(id)) {
-          for (const vid of face.vertexIds) newVertexIds.add(vid);
+      const totalTracked = this._batchedFaceIds.size + this._activeFaceIds.size;
+      if (force || mesh.faces.size > totalTracked) {
+        // New faces were created or undo restored faces — find untracked ones
+        mesh.faces.forEach((_face, id) => {
+          if (!this._batchedFaceIds.has(id) && !this._activeFaceIds.has(id)) {
+            this._activeFaceIds.add(id);
+          }
+        });
+      }
+    }
+
+    // Determine which face IDs to iterate: in batched mode, only active faces;
+    // otherwise all faces from the mesh.
+    const faceIdsToSync = this._batchedMode
+      ? this._activeFaceIds
+      : new Set(mesh.faces.keys());
+
+    // Build vertex position snapshot for dirty detection (skip when force=true)
+    const currentVertexPositions = new Map<string, string>();
+    if (!force) {
+      // Only snapshot vertices for faces we're actually syncing
+      const vertexIds = new Set<string>();
+      for (const id of faceIdsToSync) {
+        const face = mesh.faces.get(id);
+        if (face) {
+          for (const vid of face.vertexIds) vertexIds.add(vid);
         }
-      });
-      mesh.edges.forEach((edge, id) => {
-        if (!this._batchedEdgeIds.has(id)) {
-          newVertexIds.add(edge.startVertexId);
-          newVertexIds.add(edge.endVertexId);
-        }
-      });
-      for (const vid of newVertexIds) {
+      }
+      if (!this._batchedMode) {
+        // Also include edge vertices in non-batched mode
+        mesh.edges.forEach((edge) => {
+          vertexIds.add(edge.startVertexId);
+          vertexIds.add(edge.endVertexId);
+        });
+      } else {
+        // In batched mode, only snapshot non-batched edge vertices
+        mesh.edges.forEach((edge, id) => {
+          if (!this._batchedEdgeIds.has(id)) {
+            vertexIds.add(edge.startVertexId);
+            vertexIds.add(edge.endVertexId);
+          }
+        });
+      }
+      for (const vid of vertexIds) {
         const v = mesh.vertices.get(vid);
         if (v) currentVertexPositions.set(vid, `${v.position.x.toFixed(6)},${v.position.y.toFixed(6)},${v.position.z.toFixed(6)}`);
       }
-    } else {
-      mesh.vertices.forEach((v, id) => {
-        currentVertexPositions.set(id, `${v.position.x.toFixed(6)},${v.position.y.toFixed(6)},${v.position.z.toFixed(6)}`);
-      });
     }
 
-    // In batched mode, detect deleted batched faces and remove their triangles
-    console.log(`[sync] batchedMode=${this._batchedMode}, posBuffer=${!!this._batchedPositionBuffer}, batchedFaceCount=${this._batchedFaceIds.size}, meshFaceCount=${mesh.faces.size}`);
-    if (this._batchedMode && this._batchedPositionBuffer) {
-      const deletedBatchedFaces: string[] = [];
-      for (const id of this._batchedFaceIds) {
-        if (!mesh.faces.has(id)) deletedBatchedFaces.push(id);
-      }
-      if (deletedBatchedFaces.length > 0) {
-        const batchMesh = this.scene.getObjectByName('batched-faces') as THREE.Mesh | undefined;
-        if (batchMesh) {
-          const posBuffer = this._batchedPositionBuffer;
-          const posAttr = batchMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-          const normAttr = batchMesh.geometry.getAttribute('normal') as THREE.BufferAttribute;
-          const uvAttr = batchMesh.geometry.getAttribute('uv') as THREE.BufferAttribute;
-
-          for (const id of deletedBatchedFaces) {
-            const range = this._batchedFaceTriRange.get(id);
-            if (range) {
-              // Set all vertices to NaN — GPU discards any triangle with NaN positions
-              for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
-                posBuffer[i] = NaN;
-              }
-              // Also NaN the normals
-              if (normAttr) {
-                const normArr = normAttr.array as Float32Array;
-                for (let i = range.start * 3; i < (range.start + range.count) * 3; i++) {
-                  normArr[i] = NaN;
-                }
-                normAttr.needsUpdate = true;
-              }
-              // And zero the UVs
-              if (uvAttr) {
-                const uvArr = uvAttr.array as Float32Array;
-                for (let i = range.start * 2; i < (range.start + range.count) * 2; i++) {
-                  uvArr[i] = 0;
-                }
-                uvAttr.needsUpdate = true;
-              }
-            }
-            this._batchedFaceIds.delete(id);
-            this._batchedFaceTriRange.delete(id);
-          }
-          posAttr.needsUpdate = true;
-          console.log(`[sync] Removed ${deletedBatchedFaces.length} batched faces from batch buffer`);
-        }
-      }
-    }
-
-    // Sync faces (auto-assign to active layer, respect layer visibility)
-    mesh.faces.forEach((face, id) => {
-      // Skip batched faces — they're already in the merged mesh
-      if (this._batchedMode && this._batchedFaceIds.has(id)) return;
+    // Sync faces — only active faces in batched mode
+    for (const id of faceIdsToSync) {
+      const face = mesh.faces.get(id);
+      if (!face) continue; // face was deleted — cleanup handled below
       liveFaceIds.add(id);
       if (this.sceneManager) {
-        // Auto-assign new geometry to active layer
         if (!this.sceneManager.geometryLayerMap.has(id)) {
           this.sceneManager.geometryLayerMap.set(id, this.sceneManager.activeLayerId);
         }
       }
       const visible = this.sceneManager ? this.sceneManager.isEntityVisible(id) : true;
 
-      // Skip re-sync if nothing changed: check generation counter (material/topology)
-      // AND vertex positions (tools mutate positions directly without bumping generation).
       if (!force) {
         const existing = this.faceGroups.get(id);
         if (existing) {
@@ -617,7 +722,7 @@ export class SceneBridge {
           }
           if (genClean && posClean) {
             existing.visible = visible;
-            return; // Skip — nothing changed
+            continue;
           }
         }
       }
@@ -626,11 +731,10 @@ export class SceneBridge {
       this.lastFaceGeneration.set(id, face.generation);
       const group = this.faceGroups.get(id);
       if (group) group.visible = visible;
-    });
+    }
 
-    // Sync edges (auto-assign to active layer, respect layer visibility)
+    // Sync edges
     mesh.edges.forEach((edge, id) => {
-      // Skip batched edges
       if (this._batchedMode && this._batchedEdgeIds.has(id)) return;
       liveEdgeIds.add(id);
       if (this.sceneManager) {
@@ -640,7 +744,6 @@ export class SceneBridge {
       }
       const visible = this.sceneManager ? this.sceneManager.isEntityVisible(id) : true;
 
-      // Skip edge update if both vertices unchanged and edge already exists
       if (!force && this.edgeLines.has(id)) {
         const v1Hash = currentVertexPositions.get(edge.startVertexId);
         const v2Hash = currentVertexPositions.get(edge.endVertexId);
@@ -648,7 +751,7 @@ export class SceneBridge {
             v2Hash === this.lastVertexPositions.get(edge.endVertexId)) {
           const line = this.edgeLines.get(id)!;
           line.visible = visible;
-          return; // Skip — unchanged
+          return;
         }
       }
 
@@ -666,13 +769,14 @@ export class SceneBridge {
         });
         this.webglRenderer.unregisterEntityObject(id);
         this.faceGroups.delete(id);
+        this._activeFaceIds.delete(id);
       }
     }
 
     // Remove edges that no longer exist
     for (const [id, line] of this.edgeLines) {
       if (!liveEdgeIds.has(id)) {
-        this.overlayScene.remove(line);
+        this.scene.remove(line);
         line.geometry.dispose();
         this.webglRenderer.unregisterEntityObject(id);
         this.edgeLines.delete(id);
@@ -682,9 +786,14 @@ export class SceneBridge {
     // Update vertex position cache for next sync's dirty detection
     this.lastVertexPositions = currentVertexPositions;
 
+    // Refresh edge highlight glow tube positions after vertex moves
+    this.webglRenderer.refreshEdgeHighlightPositions();
+
     // Render component bounding boxes
     this.syncComponentBoxes(mesh);
-    console.log(`[SceneBridge.sync] ${(performance.now() - t0).toFixed(1)}ms, faces: ${mesh.faces.size}, edges: ${mesh.edges.size}, force: ${!!force}`);
+    // Dim entities outside the component being edited
+    this.syncComponentDimming();
+    console.log(`[SceneBridge.sync] ${(performance.now() - t0).toFixed(1)}ms, faces: ${mesh.faces.size}, active: ${this._activeFaceIds.size}, batched: ${this._batchedFaceIds.size}, force: ${!!force}`);
   }
 
   private componentBoxes = new Map<string, THREE.LineSegments>();
@@ -739,14 +848,18 @@ export class SceneBridge {
       const boxGeo = new THREE.BoxGeometry(maxX - minX, maxY - minY, maxZ - minZ);
       const edges = new THREE.EdgesGeometry(boxGeo);
 
+      const isEditing = this.sceneManager!.editingComponentId === compId;
+      const boxColor = isEditing ? 0x2196f3 : 0x9c27b0;
+
       if (this.componentBoxes.has(compId)) {
         const existing = this.componentBoxes.get(compId)!;
         existing.geometry.dispose();
         existing.geometry = edges;
         existing.position.set((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        (existing.material as THREE.LineBasicMaterial).color.setHex(boxColor);
       } else {
         const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
-          color: 0x9c27b0, linewidth: 1, depthTest: false,
+          color: boxColor, linewidth: 1, depthTest: false,
         }));
         line.position.set((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
         line.raycast = () => {};
@@ -763,6 +876,75 @@ export class SceneBridge {
         this.overlayScene.remove(line);
         line.geometry.dispose();
         this.componentBoxes.delete(id);
+      }
+    }
+  }
+
+  private _lastDimmingCompId: string | null = null;
+
+  /** When editing a component, dim faces/edges outside the component. */
+  private syncComponentDimming(): void {
+    if (!this.sceneManager) return;
+
+    const editingId = this.sceneManager.editingComponentId;
+
+    // Skip if dimming state hasn't changed
+    if (editingId === this._lastDimmingCompId) return;
+    this._lastDimmingCompId = editingId;
+
+    if (editingId) {
+      const comp = this.sceneManager.components.get(editingId);
+      const memberIds = comp ? comp.entityIds : new Set<string>();
+
+      // Dim non-member faces
+      for (const [faceId, group] of this.faceGroups) {
+        const isMember = memberIds.has(faceId);
+        group.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            const mat = child.material as THREE.MeshStandardMaterial;
+            mat.opacity = isMember ? 1 : 0.15;
+            mat.transparent = mat.opacity < 1;
+          }
+        });
+      }
+
+      // Dim non-member edges
+      for (const [edgeId, line] of this.edgeLines) {
+        const isMember = memberIds.has(edgeId);
+        // Clone material per-edge only when dimming (edges share a single material otherwise)
+        if (!isMember) {
+          if (line.material === this.edgeMaterial) {
+            line.material = this.edgeMaterial.clone();
+          }
+          (line.material as THREE.LineBasicMaterial).opacity = 0.15;
+          (line.material as THREE.LineBasicMaterial).transparent = true;
+        } else {
+          if (line.material !== this.edgeMaterial) {
+            (line.material as THREE.Material).dispose();
+            line.material = this.edgeMaterial;
+          }
+        }
+      }
+    } else {
+      // Restore all faces
+      for (const [, group] of this.faceGroups) {
+        group.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            const mat = child.material as THREE.MeshStandardMaterial;
+            // Restore opacity (respect material definition)
+            const matDef = this.materialManager?.getFaceMaterial(child.userData.entityId);
+            mat.opacity = matDef?.opacity ?? 1;
+            mat.transparent = mat.opacity < 1;
+          }
+        });
+      }
+
+      // Restore all edges to shared material
+      for (const [, line] of this.edgeLines) {
+        if (line.material !== this.edgeMaterial) {
+          (line.material as THREE.Material).dispose();
+          line.material = this.edgeMaterial;
+        }
       }
     }
   }
@@ -852,6 +1034,14 @@ export class SceneBridge {
     // Resolve material from MaterialManager
     const matDef = this.materialManager?.getFaceMaterial(id);
 
+    // DEBUG: Log material state for first 10 faces
+    if (this.faceGroups.size < 10) {
+      console.log(`[syncFace] id=${id} matDef:`, matDef ? {
+        name: matDef.name, opacity: matDef.opacity,
+        color: matDef.color, hasAlbedo: !!matDef.albedoMap,
+      } : 'null/undefined', 'triCount:', triIndices.length / 3);
+    }
+
     if (this.faceGroups.has(id)) {
       // Update: replace geometry on existing mesh, sync material
       const group = this.faceGroups.get(id)!;
@@ -918,7 +1108,7 @@ export class SceneBridge {
       const line = new THREE.Line(geometry, this.edgeMaterial); // Shared material, never swapped
       line.userData.entityId = id;
       line.userData.entityType = 'edge';
-      this.overlayScene.add(line); // Overlay scene renders AFTER main scene (separate pass)
+      this.scene.add(line); // Main scene — edges are depth-tested against faces
       this.edgeLines.set(id, line);
       this.webglRenderer.registerEntityObject(id, line);
     }
@@ -1373,7 +1563,7 @@ export class SceneBridge {
       });
     }
     for (const [, line] of this.edgeLines) {
-      this.overlayScene.remove(line);
+      this.scene.remove(line);
       line.geometry.dispose();
     }
     this.faceGroups.clear();

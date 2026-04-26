@@ -61,9 +61,13 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Main application window containing the 3D viewport, toolbars, panels, and menus. Uses a flexbox-based docking
+      description: >-
+        Main application window containing the 3D viewport, toolbars, panels, and menus. Uses a flexbox-based docking
         layout with resizable panels. The viewport occupies the center, with toolbars on top/left and panels on right. Supports
-        dark/light themes.
+        dark/light themes. Global keyboard handler in App.tsx: Cmd/Ctrl+G creates component from selection
+        (auto-includes face edges), Escape exits component editing before clearing selection.
+        Context menu (ContextMenu.tsx): face/edge menus include Make Component, component menu has
+        Edit Component and Explode. Actions wired to SceneManager component API.
   uuid: 6jdgpbuQ
 - id: window.preferences
   kind: window
@@ -276,6 +280,9 @@ nodes:
         \          Cursor changes to pointer over selectable entities. Pre-selection highlight on hover\n\
         \          (orange for faces, orange glow tube for edges). Also hosts BaseTool and ToolManager.\n\
         \          Resolves component IDs for component selection.\n\
+        \          Double-click on component enters editing mode (dimmed surroundings, blue bounding box).\n\
+        \          Escape exits component editing. Delete on component deletes all member geometry.\n\
+        \          BaseTool.resolveSelectedEntityIds() expands component IDs to member face/edge IDs.\n\
         \          BaseTool provides default getEventNeeds(phase) based on category — tools override\n\
         \          to declare snap/raycast/edgeRaycast/liveSyncOnMove/mutatesOnClick needs per phase.\n\
         \          ToolEventNeeds drives unified buildToolEvent() in ViewportCanvas, eliminating\n\
@@ -895,7 +902,10 @@ nodes:
         \          Unified event system: single buildToolEvent(e, needs) replaces three separate event\n\
         \          builders. GPU pick always runs first (O(1)), raycast/edge-raycast/snap are additive\n\
         \          based on tool-declared ToolEventNeeds metadata. Tools declare needs via getEventNeeds(phase)\n\
-        \          — no hardcoded tool ID lists in ViewportCanvas. Throttled mousemove at 16ms (~60fps)."
+        \          — no hardcoded tool ID lists in ViewportCanvas. Throttled mousemove at 16ms (~60fps).\n\
+        \          GPU pick results resolved through scene manager: layer visibility, locked state, and\n\
+        \          component protection — protected entities return component ID instead of member entity ID.\n\
+        \          resolveHit() applies same checks for raycast/edge-raycast fallback paths."
   uuid: f8kRBGQr
 - id: renderer.webgl
   kind: renderer
@@ -921,18 +931,22 @@ nodes:
       description: "Three.js WebGL renderer with ambient+directional+hemisphere lighting, logarithmicDepthBuffer,\n\
         \        and localClippingEnabled. Infinite shader-based ground grid. Selection highlight swaps face\n\
         \        materials (polygonOffset -1) and edge materials (camera-distance-scaled glow tube cylinders).\n\
-        \        Pre-selection=orange, selection=blue. Edge lines in overlay scene (separate pass after depth\n\
-        \        clear). setSectionPlane() for real-time clipping.\n\
+        \        Pre-selection=orange, selection=blue. Edge lines in main scene (depth-tested against faces,\n\
+        \        polygonOffset on faces prevents z-fighting). setSectionPlane() for real-time clipping.\n\
         \        GPU picking: renders entity IDs as unique colors to offscreen framebuffer via ShaderMaterial\n\
         \        (bypasses Three.js color management). Per-entity pick meshes for small models, vertex-color-encoded\n\
         \        batched pick mesh for large imported models. Pick buffer re-rendered only on camera move.\n\
         \        Batched mode: syncBatched() merges all faces into single BufferGeometry with frustumCulled=false,\n\
         \        castShadow=false. Edges >200K skipped. Batched face highlighting via temporary extracted geometry.\n\
+        \        extractEdgeFromBatch() promotes batched edges to individual lines for component editing.\n\
         \        Memory optimizations: glow tube object pool, numeric camera movement detection (no string allocation),\n\
         \        reusable Vector2/Vector3/Color/Plane instances.\n\
         \        Selection highlight preserves materials: refreshHighlightOriginal() updates saved original\n\
         \        material when syncFace changes a face's material while it is highlighted, preventing material\n\
-        \        loss on highlight restore."
+        \        loss on highlight restore.\n\
+        \        Component visuals: syncComponentBoxes() draws bounding boxes (purple=normal, blue=editing).\n\
+        \        syncComponentDimming() sets opacity=0.15 on faces/edges outside the editing component,\n\
+        \        restores full opacity on exit. Edge dimming clones material per-edge to avoid shared mutation."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -1627,12 +1641,18 @@ nodes:
       hierarchy: tree
       layers: true
       groups: true
+      components: true
     impl:
       language: TypeScript
       complexity: complex
       status: implemented
     docs:
-      description: Manages the hierarchical scene graph. Root contains loose geometry, groups, and component instances.
+      description: >-
+        Manages the hierarchical scene graph. Root contains loose geometry, groups, and component instances.
+        Component system: createComponent(name, entityIds) groups face/edge IDs into a selectable unit.
+        Components support nested editing — getEntityComponent() returns innermost non-editing component.
+        isEntityProtected() and isEntityEditable() enforce component boundaries.
+        enterComponent()/exitComponent() toggle editing mode with editingComponentId state.
       notes: "## Typed Interface\n\n```typescript\nimport { HalfEdgeMesh } from '../geometry/mesh';\nimport { Matrix4, Vector3\
         \ } from '../math/types';\nimport { Material } from '../data/materials';\n\n// ========== Scene Graph Types ==========\n\
         \nexport type EntityType = 'vertex' | 'edge' | 'face' | 'group' | 'component_instance' | 'component_definition' |\
@@ -1939,8 +1959,11 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Electron renderer process for the main window. Runs React UI, Three.js viewport, tool system, and all data
-        managers.
+      description: >-
+        Electron renderer process for the main window. Runs React UI, Three.js viewport, tool system, and all data
+        managers. syncSelection() expands component IDs to member face/edge IDs for highlight rendering,
+        extracts both batched faces (extractFromBatch) and batched edges (extractEdgeFromBatch) when a
+        component is selected so individual entities can be moved/edited.
       notes: "## Typed Interface\n\n```typescript\nimport { MainProcessAPI, RendererEvents } from '../system/main-process';\n\
         import { IModelDocument } from '../data/document';\nimport { IRenderer } from '../rendering/renderer';\nimport { ICameraController\
         \ } from '../rendering/camera';\nimport { IInferenceEngine } from '../geometry/inference';\nimport { ITool } from\
@@ -3150,7 +3173,7 @@ nodes:
       description: "Syncs geometry engine B-Rep → Three.js objects. Faces as THREE.Group\n\
         \          (DoubleSide meshes) in main scene with per-face PBR materials from MaterialManager.\n\
         \          Texture mapping uses face-local UV projection (tangent/bitangent from first edge) so\n\
-        \          textures stick to faces when moved/rotated. Edges as THREE.Line in overlay scene.\n\
+        \          textures stick to faces when moved/rotated. Edges as THREE.Line in main scene (depth-tested).\n\
         \          Component bounding boxes as purple wireframe. Snap system: vertices, midpoints,\n\
         \          and edge-edge intersections. Texture cache for data URL → THREE.Texture.\n\
         \          Preview lines and snap markers non-raycastable (raycast=()=>{}).\n\
