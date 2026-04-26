@@ -71,7 +71,6 @@ export class WebGLRenderer implements IRenderer {
   private _pickEntityToId = new Map<string, number>(); // entityId -> encoded color
   private _nextPickId = 1;
   private _pickPixelBuffer = new Uint8Array(4);
-  private _gpuPickLogCounter = 0;
   private _pickSceneDirty = true;  // rebuild pick scene objects (entity added/removed)
   private _pickBufferDirty = true; // re-render pick buffer (camera moved)
   // Batched pick mesh (vertex-color encoded face IDs)
@@ -80,6 +79,8 @@ export class WebGLRenderer implements IRenderer {
   private _batchedFaceHighlightFn: ((faceId: string) => THREE.BufferGeometry | null) | null = null;
   // Temporary highlight meshes for batched faces
   private _batchedHighlights = new Map<string, THREE.Mesh>();
+  // Geometry cache for batched face highlights — avoids re-creating geometry each hover
+  private _batchedHighlightGeoCache = new Map<string, THREE.BufferGeometry>();
   // Camera movement detection — numeric comparison avoids string allocation per frame
   private _lastCamX = NaN;
   private _lastCamY = NaN;
@@ -142,14 +143,16 @@ export class WebGLRenderer implements IRenderer {
   registerEntityObject(entityId: string, object: THREE.Object3D): void {
     object.userData.entityId = entityId;
     this._entityObjects.set(entityId, object);
-    this._pickSceneDirty = true;
+    // Incremental: add to pick scene directly instead of full rebuild
+    this._addToPickScene(entityId, object);
     this._pickBufferDirty = true;
   }
 
   /** Unregister an entity's Three.js object. */
   unregisterEntityObject(entityId: string): void {
     this._entityObjects.delete(entityId);
-    this._pickSceneDirty = true;
+    // Incremental: remove from pick scene directly instead of full rebuild
+    this._removeFromPickScene(entityId);
     this._pickBufferDirty = true;
   }
 
@@ -207,6 +210,9 @@ export class WebGLRenderer implements IRenderer {
   dispose(): void {
     this.stopRenderLoop();
     this._clearBatchedHighlights();
+    // Dispose cached highlight geometries
+    for (const [, geo] of this._batchedHighlightGeoCache) geo.dispose();
+    this._batchedHighlightGeoCache.clear();
     if (this._batchedPickMesh) {
       this._batchedPickMesh.geometry.dispose();
       (this._batchedPickMesh.material as THREE.Material).dispose();
@@ -273,10 +279,78 @@ export class WebGLRenderer implements IRenderer {
     }
   `;
 
+  // Track pick objects by entity ID for incremental add/remove
+  private _pickObjectsByEntity = new Map<string, THREE.Object3D[]>();
+
+  /** Incrementally add a single entity to the pick scene. */
+  private _addToPickScene(entityId: string, obj: THREE.Object3D): void {
+    // If pick scene hasn't been built yet, just mark dirty for initial full build
+    if (this._pickSceneDirty) return;
+
+    const pickId = this.getPickId(entityId);
+    const [r, g, b] = this.pickIdToRGB(pickId);
+    const pickMat = new THREE.ShaderMaterial({
+      uniforms: { pickColor: { value: new THREE.Vector3(r, g, b) } },
+      vertexShader: WebGLRenderer.PICK_VERT,
+      fragmentShader: WebGLRenderer.PICK_FRAG,
+      side: THREE.DoubleSide,
+    });
+
+    const added: THREE.Object3D[] = [];
+
+    if (obj instanceof THREE.Mesh) {
+      const pickMesh = new THREE.Mesh(obj.geometry, pickMat);
+      pickMesh.matrixAutoUpdate = false;
+      pickMesh.matrix.copy(obj.matrixWorld);
+      pickMesh.visible = obj.visible;
+      pickMesh.userData._pickEntityId = entityId;
+      this._pickScene.add(pickMesh);
+      added.push(pickMesh);
+    } else if (obj instanceof THREE.Line) {
+      const pickLine = new THREE.Line(obj.geometry, pickMat);
+      pickLine.matrixAutoUpdate = false;
+      pickLine.matrix.copy(obj.matrixWorld);
+      pickLine.visible = obj.visible;
+      pickLine.userData._pickEntityId = entityId;
+      this._pickOverlayScene.add(pickLine);
+      added.push(pickLine);
+    } else if (obj instanceof THREE.Group) {
+      obj.traverse(child => {
+        if (child instanceof THREE.Mesh && child !== (obj as THREE.Object3D)) {
+          const pickMesh = new THREE.Mesh(child.geometry, pickMat);
+          pickMesh.matrixAutoUpdate = false;
+          pickMesh.matrix.copy(child.matrixWorld);
+          pickMesh.visible = child.visible;
+          pickMesh.userData._pickEntityId = entityId;
+          this._pickScene.add(pickMesh);
+          added.push(pickMesh);
+        }
+      });
+    }
+
+    if (added.length > 0) {
+      this._pickObjectsByEntity.set(entityId, added);
+    }
+  }
+
+  /** Incrementally remove a single entity from the pick scene. */
+  private _removeFromPickScene(entityId: string): void {
+    const objects = this._pickObjectsByEntity.get(entityId);
+    if (objects) {
+      for (const obj of objects) {
+        if (obj.parent === this._pickScene) this._pickScene.remove(obj);
+        else if (obj.parent === this._pickOverlayScene) this._pickOverlayScene.remove(obj);
+        if ((obj as THREE.Mesh).material) {
+          ((obj as THREE.Mesh).material as THREE.Material).dispose();
+        }
+      }
+      this._pickObjectsByEntity.delete(entityId);
+    }
+  }
+
   /** Rebuild the pick scene by cloning geometry with pick-color materials. */
   private rebuildPickScene(): void {
     const t0 = performance.now();
-    console.log(`[rebuildPickScene] starting, ${this._entityObjects.size} entities`);
     // Dispose previous pick scene objects (geometry is shared, don't dispose it; but remove references)
     for (const child of [...this._pickScene.children]) {
       this._pickScene.remove(child);
@@ -289,6 +363,13 @@ export class WebGLRenderer implements IRenderer {
     this._pickMaterials.clear();
     this._pickLineMaterials.forEach(m => m.dispose());
     this._pickLineMaterials.clear();
+    // Clear incremental tracking — full rebuild replaces everything
+    for (const [, objs] of this._pickObjectsByEntity) {
+      for (const o of objs) {
+        if ((o as THREE.Mesh).material) ((o as THREE.Mesh).material as THREE.Material).dispose();
+      }
+    }
+    this._pickObjectsByEntity.clear();
 
     // Clone main scene objects with raw ShaderMaterial pick colors (bypasses color management)
     this._entityObjects.forEach((obj, entityId) => {
@@ -303,18 +384,24 @@ export class WebGLRenderer implements IRenderer {
         side: THREE.DoubleSide,
       });
 
+      const added: THREE.Object3D[] = [];
+
       if (obj instanceof THREE.Mesh) {
         const pickMesh = new THREE.Mesh(obj.geometry, pickMat);
         pickMesh.matrixAutoUpdate = false;
         pickMesh.matrix.copy(obj.matrixWorld);
         pickMesh.visible = obj.visible;
+        pickMesh.userData._pickEntityId = entityId;
         this._pickScene.add(pickMesh);
+        added.push(pickMesh);
       } else if (obj instanceof THREE.Line) {
         const pickLine = new THREE.Line(obj.geometry, pickMat);
         pickLine.matrixAutoUpdate = false;
         pickLine.matrix.copy(obj.matrixWorld);
         pickLine.visible = obj.visible;
+        pickLine.userData._pickEntityId = entityId;
         this._pickOverlayScene.add(pickLine);
+        added.push(pickLine);
       }
 
       // Handle groups (face groups contain a mesh child)
@@ -327,9 +414,15 @@ export class WebGLRenderer implements IRenderer {
             pickMesh.matrixAutoUpdate = false;
             pickMesh.matrix.copy(child.matrixWorld);
             pickMesh.visible = child.visible;
+            pickMesh.userData._pickEntityId = entityId;
             this._pickScene.add(pickMesh);
+            added.push(pickMesh);
           }
         });
+      }
+
+      if (added.length > 0) {
+        this._pickObjectsByEntity.set(entityId, added);
       }
     });
 
@@ -338,7 +431,9 @@ export class WebGLRenderer implements IRenderer {
       this._pickScene.add(this._batchedPickMesh);
     }
 
-    console.log(`[rebuildPickScene] done in ${(performance.now() - t0).toFixed(1)}ms, pick scene: ${this._pickScene.children.length}, pick overlay: ${this._pickOverlayScene.children.length}, batched: ${this._batchedPickMesh ? 'yes' : 'no'}`);
+    if (performance.now() - t0 > 50) {
+      console.warn(`[rebuildPickScene] slow: ${(performance.now() - t0).toFixed(1)}ms, ${this._entityObjects.size} entities`);
+    }
   }
 
   /** Render the pick buffer and read the pixel at (screenX, screenY).
@@ -358,6 +453,7 @@ export class WebGLRenderer implements IRenderer {
 
     // Re-render pick buffer when camera moved or scene rebuilt
     if (this._pickBufferDirty) {
+      const t0_pick = performance.now();
       const currentRT = this._renderer.getRenderTarget();
       const currentToneMapping = this._renderer.toneMapping;
       const currentOutputColorSpace = this._renderer.outputColorSpace;
@@ -376,6 +472,8 @@ export class WebGLRenderer implements IRenderer {
       this._renderer.outputColorSpace = currentOutputColorSpace;
 
       this._pickBufferDirty = false;
+      const dt_pick = performance.now() - t0_pick;
+      if (dt_pick > 5) console.warn(`[gpuPick] pick buffer re-render took ${dt_pick.toFixed(1)}ms`);
     }
 
     // Read single pixel under cursor
@@ -392,27 +490,13 @@ export class WebGLRenderer implements IRenderer {
     const [r, g, b, a] = this._pickPixelBuffer;
     const pickId = (r << 16) | (g << 8) | b;
 
-    // Debug: log every 60th call to avoid spam
-    if (!this._gpuPickLogCounter) this._gpuPickLogCounter = 0;
-    this._gpuPickLogCounter++;
-    if (this._gpuPickLogCounter % 60 === 1) {
-      console.log(`[gpuPick] pixel at (${screenX},${screenY}): r=${r} g=${g} b=${b} a=${a} -> pickId=${pickId}, pickScene children=${this._pickScene.children.length}, dirty=${this._pickSceneDirty}/${this._pickBufferDirty}, entities=${this._entityObjects.size}, batchedMap=${this._batchedPickIdToFace.size}`);
-    }
-
     if (pickId === 0) return null; // Background (no entity)
 
     // Check batched face pick IDs first, then per-entity pick IDs
     const batchedFace = this._batchedPickIdToFace.get(pickId);
-    if (batchedFace) {
-      console.log(`[gpuPick] batched hit: pickId=${pickId} -> ${batchedFace}`);
-      return batchedFace;
-    }
+    if (batchedFace) return batchedFace;
 
-    const entityHit = this._pickIdToEntity.get(pickId) || null;
-    if (entityHit) {
-      console.log(`[gpuPick] entity hit: pickId=${pickId} -> ${entityHit}`);
-    }
-    return entityHit;
+    return this._pickIdToEntity.get(pickId) || null;
   }
 
   resize(width: number, height: number): void {
@@ -461,17 +545,12 @@ export class WebGLRenderer implements IRenderer {
     this._renderer.render(this._overlayScene, camera);
     const tOverlay = performance.now() - t2;
 
-    // Accumulate and log once per second
+    // Perf accumulation (no logging — use stats overlay instead)
     this._perfFrameCount++;
     this._perfMainTotal += tMain;
     this._perfOverlayTotal += tOverlay;
     this._perfUpdateTotal += tUpdate;
     if (startTime - this._lastPerfLog >= 1000) {
-      const n = this._perfFrameCount;
-      const info = this._renderer.info;
-      console.log(
-        `[Render] ${n} frames/s | main: ${(this._perfMainTotal / n).toFixed(1)}ms | overlay: ${(this._perfOverlayTotal / n).toFixed(1)}ms | update: ${(this._perfUpdateTotal / n).toFixed(1)}ms | drawCalls: ${info.render.calls} | tris: ${info.render.triangles} | scene children: ${this._scene.children.length} | overlay children: ${this._overlayScene.children.length}`
-      );
       this._perfFrameCount = 0;
       this._perfMainTotal = 0;
       this._perfOverlayTotal = 0;
@@ -568,21 +647,37 @@ export class WebGLRenderer implements IRenderer {
   }
 
   setSelectionHighlight(entityIds: string[]): void {
+    // Short-circuit: if same set of IDs, skip all work
+    if (entityIds.length === this._selectedEntityIds.size) {
+      let same = true;
+      for (const id of entityIds) {
+        if (!this._selectedEntityIds.has(id)) { same = false; break; }
+      }
+      if (same) { return; }
+    }
+
+    const t0 = performance.now();
     // Restore previously highlighted objects
     this._restoreHighlighted();
+    const dtRestore = performance.now() - t0;
     // Remove old batched highlights
     this._clearBatchedHighlights();
     this._selectedEntityIds = new Set(entityIds);
 
+    let applied = 0, batched = 0;
     for (const id of entityIds) {
       const obj = this._entityObjects.get(id);
       if (obj) {
         this._applyHighlight(obj, 'selection');
+        applied++;
       } else {
         // Try batched face highlight
         this._addBatchedHighlight(id, 'selection');
+        batched++;
       }
     }
+    const dt = performance.now() - t0;
+    if (dt > 2) console.warn(`[setSelectionHighlight] ${dt.toFixed(1)}ms — restore: ${dtRestore.toFixed(1)}ms, applied: ${applied}, batched: ${batched}`);
   }
 
   setPreSelectionHighlight(entityId: string | null): void {
@@ -590,31 +685,48 @@ export class WebGLRenderer implements IRenderer {
   }
 
   setPreSelectionHighlightMulti(entityIds: string[]): void {
+    // Short-circuit: if same set of IDs, skip all work
+    if (entityIds.length === this._preSelectionEntityIds.size) {
+      let same = true;
+      for (const id of entityIds) {
+        if (!this._preSelectionEntityIds.has(id)) { same = false; break; }
+      }
+      if (same) { return; }
+    }
+
+    const t0 = performance.now();
     // Restore previous pre-selection entities
+    let restored = 0;
     for (const prevId of this._preSelectionEntityIds) {
       if (!entityIds.includes(prevId)) {
         const prevObj = this._entityObjects.get(prevId);
         if (prevObj && !this._selectedEntityIds.has(prevId)) {
           this._restoreObject(prevObj);
+          restored++;
         }
         // Remove batched highlight for deselected entities
         this._removeBatchedHighlight(prevId);
       }
     }
+    const dtRestore = performance.now() - t0;
 
     this._preSelectionEntityIds = new Set(entityIds);
 
+    let applied = 0;
     for (const id of entityIds) {
       if (!this._selectedEntityIds.has(id)) {
         const obj = this._entityObjects.get(id);
         if (obj) {
           this._applyHighlight(obj, 'preselection');
+          applied++;
         } else {
           // Try batched face highlight
           this._addBatchedHighlight(id, 'preselection');
         }
       }
     }
+    const dt = performance.now() - t0;
+    if (dt > 2) console.warn(`[setPreSelectionHighlight] ${dt.toFixed(1)}ms — restore: ${dtRestore.toFixed(1)}ms (${restored}), applied: ${applied}, total ids: ${entityIds.length}`);
   }
 
   // Selection highlight materials
@@ -738,6 +850,33 @@ export class WebGLRenderer implements IRenderer {
     }
   }
 
+  /** Update glow tube positions for all highlighted edges (call after vertex positions change). */
+  refreshEdgeHighlightPositions(): void {
+    for (const [id, saved] of this._highlightedObjects) {
+      if (!(saved.obj instanceof THREE.Line)) continue;
+      const tube = (saved.obj as any).__glowTube as THREE.Mesh | undefined;
+      if (!tube) continue;
+
+      const positions = (saved.obj.geometry as THREE.BufferGeometry).getAttribute('position');
+      if (!positions || positions.count < 2) continue;
+
+      this._hlP1.set(positions.getX(0), positions.getY(0), positions.getZ(0));
+      this._hlP2.set(positions.getX(1), positions.getY(1), positions.getZ(1));
+      this._hlDir.subVectors(this._hlP2, this._hlP1);
+      const len = this._hlDir.length();
+      if (len > 0.001) {
+        this._hlMid.addVectors(this._hlP1, this._hlP2).multiplyScalar(0.5);
+        const camPos = this._cameraController.getThreeCamera().position;
+        const camDist = this._hlMid.distanceTo(camPos);
+        const tubeRadius = Math.max(camDist * 0.003, 0.005);
+
+        tube.position.copy(this._hlMid);
+        tube.scale.set(tubeRadius, tubeRadius, len);
+        tube.lookAt(this._hlP2);
+      }
+    }
+  }
+
   /** Update the saved original material for a highlighted object.
    *  Call this after syncFace changes a face's material while it's highlighted. */
   refreshHighlightOriginal(entityId: string, newMaterial: THREE.Material | THREE.Material[]): void {
@@ -777,8 +916,14 @@ export class WebGLRenderer implements IRenderer {
   /** Add a temporary highlight mesh for a batched face. */
   private _addBatchedHighlight(faceId: string, mode: 'selection' | 'preselection'): void {
     if (!this._batchedFaceHighlightFn || this._batchedHighlights.has(faceId)) return;
-    const geo = this._batchedFaceHighlightFn(faceId);
-    if (!geo) return;
+    // Use cached geometry if available, otherwise create and cache
+    let geo = this._batchedHighlightGeoCache.get(faceId);
+    if (!geo) {
+      const created = this._batchedFaceHighlightFn(faceId);
+      if (!created) return;
+      geo = created;
+      this._batchedHighlightGeoCache.set(faceId, geo);
+    }
     const mat = mode === 'selection' ? this._selHighlightFace : this._preSelHighlightFace;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = `batched-highlight-${faceId}`;
@@ -793,7 +938,7 @@ export class WebGLRenderer implements IRenderer {
     const mesh = this._batchedHighlights.get(faceId);
     if (mesh) {
       this._scene.remove(mesh);
-      mesh.geometry.dispose();
+      // Don't dispose geometry — it's cached in _batchedHighlightGeoCache
       this._batchedHighlights.delete(faceId);
     }
   }
@@ -802,7 +947,7 @@ export class WebGLRenderer implements IRenderer {
   private _clearBatchedHighlights(): void {
     for (const [, mesh] of this._batchedHighlights) {
       this._scene.remove(mesh);
-      mesh.geometry.dispose();
+      // Don't dispose geometry — cached
     }
     this._batchedHighlights.clear();
   }

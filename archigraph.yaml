@@ -920,7 +920,10 @@ nodes:
     perf:
       critical: true
       optimizations: Frustum culling, instanced rendering for components, LOD for distant objects, GPU picking for selection,
-        batched geometry for draw call reduction
+        batched geometry for draw call reduction, Earcut triangulation cache (reuse tri indices when face topology unchanged),
+        in-place Float32Array buffer writes for faces and edges (skip geometry disposal/creation during transforms),
+        dirty vertex tracking with vertex→face/edge adjacency for targeted sync iteration (O(dirty) not O(all)),
+        deferred component bounding box updates (unit-box with scale transform, skip unaffected components)
       benchmarks: Target 60fps for models up to 500K faces, 30fps for models up to 2M faces
     impl:
       language: TypeScript
@@ -944,7 +947,15 @@ nodes:
         \        Selection highlight preserves materials: refreshHighlightOriginal() updates saved original\n\
         \        material when syncFace changes a face's material while it is highlighted, preventing material\n\
         \        loss on highlight restore.\n\
-        \        Component visuals: syncComponentBoxes() draws bounding boxes (purple=normal, blue=editing).\n\
+        \        Non-batched sync performance: _faceTriCache caches Earcut triangulation indices keyed on\n\
+        \        face.generation + vertex count — reused when topology unchanged (move/scale/rotate). syncFace()\n\
+        \        and syncEdge() write Float32Array position/normal/UV buffers in-place with needsUpdate=true,\n\
+        \        skipping geometry disposal/creation. markVerticesDirty(ids) accepts dirty vertex IDs from tools;\n\
+        \        resolveDirtyAdjacency() uses engine.getVertexFaces/getVertexEdgeIds to compute affected faces/edges,\n\
+        \        reducing iteration from O(all faces) to O(dirty faces). Dirty tracking cleared after each sync().\n\
+        \        Component visuals: syncComponentBoxes() draws bounding boxes (purple=normal, blue=editing),\n\
+        \        uses unit-box with scale transform instead of allocating new BoxGeometry each frame,\n\
+        \        skips components whose vertices don't overlap the dirty set.\n\
         \        syncComponentDimming() sets opacity=0.15 on faces/edges outside the editing component,\n\
         \        restores full opacity on exit. Edge dimming clones material per-edge to avoid shared mutation."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
@@ -1445,7 +1456,7 @@ nodes:
     perf:
       critical: true
       optimizations: Spatial indexing (octree) for ray intersection, edge hash map for fast topology queries, lazy face triangulation,
-        incremental validation
+        incremental validation, vertex→face adjacency via getVertexFaces(), vertex→edge adjacency via getVertexEdgeIds()
       benchmarks: Face creation < 1ms, edge split < 0.5ms, face-face intersection < 5ms per pair
     impl:
       language: TypeScript
@@ -1465,7 +1476,11 @@ nodes:
         \          splitFaceWithPath scans the full chain to find entry/exit points on a face\n\
         \          boundary (handles lines extending beyond face). Wrapping edge insertion uses\n\
         \          modular indexing. autoCreateFaces uses loopContainsInteriorVertex — 2D\n\
-        \          point-in-polygon test rejects loops enclosing subdivided geometry."
+        \          point-in-polygon test rejects loops enclosing subdivided geometry.\n\
+        \          Adjacency queries: getVertexFaces(vertexId) and getVertexEdgeIds(vertexId)\n\
+        \          forward to HalfEdgeMesh for O(1) half-edge-walk adjacency lookups.\n\
+        \          Used by SceneBridge dirty tracking to resolve affected faces/edges from\n\
+        \          dirty vertex sets during move/scale/rotate operations."
       notes: "## Typed Interface\n\n```typescript\nimport { Vector3, Matrix4, Plane, BoundingBox } from '../math/types';\n\
         \n// ========== Core Geometry Types ==========\n\nexport interface GeometryId {\n  readonly id: string; // unique\
         \ stable ID (UUID)\n}\n\nexport interface Vertex extends GeometryId {\n  position: Vector3; // float64\n  edges: HalfEdge[];\
@@ -1522,14 +1537,20 @@ nodes:
     perf:
       critical: true
       optimizations: Indexed vertex buffer for GPU upload, lazy normal recomputation, dirty flag system for incremental updates,
-        pooled object allocation
+        pooled object allocation, vertex→face adjacency via getVertexFaces() (half-edge walk with fallback scan),
+        vertex→edge adjacency via getVertexEdgeIds() (half-edge walk with fallback scan)
     impl:
       language: TypeScript
       complexity: very-complex
       status: implemented
     docs:
-      description: Primary mesh data structure using half-edge (DCEL) representation. Each edge is stored as two half-edges
-        pointing in opposite directions, each belonging to a face.
+      description: "Primary mesh data structure using half-edge (DCEL) representation. Each edge is stored as two half-edges\n\
+        \        pointing in opposite directions, each belonging to a face.\n\
+        \        getVertexFaces(vertexId): walks vertexToHalfEdges map to collect unique face IDs in O(degree).\n\
+        \        Fallback linear scan for bulk-imported meshes without full half-edge topology.\n\
+        \        getVertexEdgeIds(vertexId): walks half-edges to collect edge IDs, plus fallback edge map scan.\n\
+        \        Both methods used by SceneBridge for targeted dirty sync — only iterate faces/edges\n\
+        \        adjacent to moved vertices instead of the full mesh."
       notes: "## Typed Interface\n\n```typescript\nimport { Vertex, Edge, HalfEdge, Face, Loop, GeometryId } from '../geometry/types';\n\
         import { Vector3, BoundingBox } from '../math/types';\nimport { Octree } from '../spatial/octree';\n\nexport interface\
         \ HalfEdgeMeshStats {\n  vertexCount: number;\n  edgeCount: number;\n  faceCount: number;\n  halfEdgeCount: number;\n\
@@ -1964,6 +1985,10 @@ nodes:
         managers. syncSelection() expands component IDs to member face/edge IDs for highlight rendering,
         extracts both batched faces (extractFromBatch) and batched edges (extractEdgeFromBatch) when a
         component is selected so individual entities can be moved/edited.
+        syncScene(dirtyVertexIds?) accepts optional dirty vertex IDs from tools — forwards to
+        SceneBridge.markVerticesDirty() for targeted sync. Tools (move, scale, rotate, offset) set
+        _dirtyVertexIds after mutating vertex positions; ViewportCanvas reads and passes them through
+        on liveSyncOnMove and syncAfterAction callbacks.
       notes: "## Typed Interface\n\n```typescript\nimport { MainProcessAPI, RendererEvents } from '../system/main-process';\n\
         import { IModelDocument } from '../data/document';\nimport { IRenderer } from '../rendering/renderer';\nimport { ICameraController\
         \ } from '../rendering/camera';\nimport { IInferenceEngine } from '../geometry/inference';\nimport { ITool } from\

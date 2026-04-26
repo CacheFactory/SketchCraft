@@ -20,12 +20,36 @@ export function ViewportCanvas() {
   const [dragBox, setDragBox] = useState<{ x: number; y: number; w: number; h: number; mode: string } | null>(null);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
 
+  // Track last highlight state to avoid redundant highlight updates
+  const lastHighlightRef = useRef<{ selKey: string; preSelKey: string }>({ selKey: '', preSelKey: '' });
+
   /** Push selection state from the app into React context. */
-  const syncSelectionToUI = useCallback(() => {
+  const syncSelectionToUI = useCallback((skipIfUnchanged?: boolean) => {
     const app = appInstanceRef.current;
     if (!app) return;
 
+    // Quick check: if selection + pre-selection haven't changed, skip expensive highlight updates
+    if (skipIfUnchanged) {
+      const sel = app.document.selection;
+      const selKey = Array.from(sel.state.entityIds).join(',');
+      const preSelKey = sel.getPreSelectionIds().join(',');
+      if (selKey === lastHighlightRef.current.selKey && preSelKey === lastHighlightRef.current.preSelKey) {
+        return; // Nothing changed — skip highlight teardown/rebuild
+      }
+      lastHighlightRef.current.selKey = selKey;
+      lastHighlightRef.current.preSelKey = preSelKey;
+    } else {
+      // Force path — update cached keys
+      const sel = app.document.selection;
+      lastHighlightRef.current.selKey = Array.from(sel.state.entityIds).join(',');
+      lastHighlightRef.current.preSelKey = sel.getPreSelectionIds().join(',');
+    }
+
+    const t0_sync = performance.now();
     const { entityIds, count } = app.syncSelection();
+    const dt_sync = performance.now() - t0_sync;
+    if (dt_sync > 2) console.warn(`[syncSelectionToUI] syncSelection took ${dt_sync.toFixed(1)}ms, sel=${entityIds.length}, skipCheck=${!!skipIfUnchanged}`);
+
     updateState({
       selectedEntityIds: entityIds,
       selectedCount: count,
@@ -37,11 +61,17 @@ export function ViewportCanvas() {
     const app = appInstanceRef.current;
     if (!app) return;
 
-    app.syncScene();
+    const tool = app.toolManager.getActiveTool();
+    const dirtyVerts = (tool as any)?._dirtyVertexIds;
+    if (dirtyVerts) {
+      app.syncScene(dirtyVerts);
+      (tool as any)._dirtyVertexIds = null;
+    } else {
+      app.syncScene();
+    }
     syncSelectionToUI();
     syncPreviews();
 
-    const tool = app.toolManager.getActiveTool();
     if (tool) {
       updateState({
         vcbLabel: tool.getVCBLabel(),
@@ -141,9 +171,10 @@ export function ViewportCanvas() {
     return { hitEntityId: null, hitPoint: null };
   }, []);
 
-  /** Unified tool event builder. GPU pick always runs; raycast, edge raycast,
-   *  and snap are additive based on tool-declared needs. */
-  const buildToolEvent = useCallback((e: React.MouseEvent, needs: ToolEventNeeds): ToolMouseEvent | null => {
+  /** Unified tool event builder. GPU pick runs unless skipPicking is set;
+   *  raycast, edge raycast, and snap are additive based on tool-declared needs. */
+  const buildToolEvent = useCallback((e: React.MouseEvent, needs: ToolEventNeeds, skipPicking = false): ToolMouseEvent | null => {
+    const t0_build = performance.now();
     const app = appInstanceRef.current;
     if (!app?.viewport) return null;
     const container = containerRef.current;
@@ -157,11 +188,30 @@ export function ViewportCanvas() {
     const renderer = app.viewport.renderer as any;
     const hasPicking = renderer.hasEntityObjects ? renderer.hasEntityObjects() : false;
 
-    // GPU pick always runs (O(1) pixel read)
+    // GPU pick: skip during mousemove when tool doesn't need hit detection
+    // (avoids expensive pick buffer re-render during camera orbit/pan)
     let hitEntityId: string | null = null;
     let hitPoint: Vec3 | null = worldPoint;
-    if (renderer.gpuPick) {
+    if (!skipPicking && renderer.gpuPick) {
+      const t0_pick = performance.now();
       hitEntityId = renderer.gpuPick(screenX, screenY);
+      const dt_pick = performance.now() - t0_pick;
+      if (dt_pick > 5) console.warn(`[buildToolEvent] gpuPick took ${dt_pick.toFixed(1)}ms`);
+    }
+
+    // Resolve GPU pick through scene manager (layer visibility, component protection)
+    if (hitEntityId) {
+      const sm = app.document.scene as any;
+      if (sm?.isEntityVisible && !sm.isEntityVisible(hitEntityId)) {
+        hitEntityId = null;
+      } else if (sm?.isEntityLocked && sm.isEntityLocked(hitEntityId)) {
+        hitEntityId = null;
+      } else if (sm?.getEntityComponent && sm?.isEntityProtected) {
+        if (sm.isEntityProtected(hitEntityId)) {
+          const compId = sm.getEntityComponent(hitEntityId);
+          if (compId) hitEntityId = compId;
+        }
+      }
     }
 
     // Full raycast (additive: refines hitPoint, may find edges/vertices GPU pick misses)
@@ -203,6 +253,9 @@ export function ViewportCanvas() {
     } else if (app.sceneBridge) {
       app.sceneBridge.hideSnapMarker();
     }
+
+    const dt_build = performance.now() - t0_build;
+    if (dt_build > 5) console.warn(`[buildToolEvent] total ${dt_build.toFixed(1)}ms, hit=${hitEntityId}, skipPick=${skipPicking}`);
 
     return {
       screenX, screenY, worldPoint,
@@ -313,13 +366,21 @@ export function ViewportCanvas() {
     if (!tool) return;
 
     const needs = tool.getEventNeeds((tool as any).phase ?? 'idle');
-    const ev = buildToolEvent(e, needs);
+    // Skip GPU pick re-render during mousemove when tool doesn't need hit info
+    const needsPicking = needs.raycast || needs.edgeRaycast || needs.snap || needs.mutatesOnClick;
+    const ev = buildToolEvent(e, needs, !needsPicking);
     if (!ev) return;
 
     tool.onMouseMove(ev);
 
     if (needs.liveSyncOnMove && app) {
-      app.syncScene();
+      const dirtyVerts = (tool as any)._dirtyVertexIds;
+      if (dirtyVerts) {
+        app.syncScene(dirtyVerts);
+        (tool as any)._dirtyVertexIds = null;
+      } else {
+        app.syncScene();
+      }
     }
 
     syncPreviews();
@@ -334,7 +395,7 @@ export function ViewportCanvas() {
       }
     }
 
-    syncSelectionToUI();
+    syncSelectionToUI(true); // skip if pre-selection unchanged (hot path)
 
     updateState({
       vcbValue: tool.getVCBValue(),

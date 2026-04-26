@@ -39,6 +39,14 @@ export class HistoryManager implements IHistoryManager {
   private _serialize: (() => ArrayBuffer) | null = null;
   private _deserialize: ((data: ArrayBuffer) => void) | null = null;
 
+  /**
+   * Cached snapshot of the current mesh state, set after each commit/undo/redo.
+   * Reused as the "before" snapshot in beginTransaction to avoid a synchronous
+   * serialize (~6800ms for 141K faces). Falls back to synchronous serialize
+   * if not available (first transaction or deferred callback hasn't fired yet).
+   */
+  private _lastSnapshot: ArrayBuffer | null = null;
+
   /** Wire up serialization/deserialization for snapshot-based undo/redo. */
   setSnapshotCallbacks(
     serialize: () => ArrayBuffer,
@@ -56,8 +64,19 @@ export class HistoryManager implements IHistoryManager {
       this.commitTransaction();
     }
 
-    // Snapshot current state BEFORE the operation
-    const beforeSnapshot = this._serialize ? this._serialize() : new ArrayBuffer(0);
+    // Snapshot current state BEFORE the operation.
+    // Reuse cached snapshot if available (0ms), otherwise fall back to sync serialize.
+    let beforeSnapshot: ArrayBuffer;
+    if (this._lastSnapshot) {
+      beforeSnapshot = this._lastSnapshot;
+      this._lastSnapshot = null; // consumed
+      console.log(`[HistoryManager] beginTransaction "${name}" reused cached snapshot (${(beforeSnapshot.byteLength / 1024 / 1024).toFixed(1)}MB, 0ms)`);
+    } else {
+      const t0 = performance.now();
+      beforeSnapshot = this._serialize ? this._serialize() : new ArrayBuffer(0);
+      const dt = performance.now() - t0;
+      if (dt > 5) console.warn(`[HistoryManager] beginTransaction "${name}" serialize took ${dt.toFixed(0)}ms (${(beforeSnapshot.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+    }
 
     this.activeTransaction = {
       id: uuid(),
@@ -77,8 +96,31 @@ export class HistoryManager implements IHistoryManager {
     const tx = this.activeTransaction;
     this.activeTransaction = null;
 
-    // Snapshot state AFTER the operation
-    tx.afterSnapshot = this._serialize ? this._serialize() : new ArrayBuffer(0);
+    // Defer the "after" snapshot — it's only needed for redo, not undo.
+    // Serialize in an idle callback to avoid blocking the UI thread.
+    tx.afterSnapshot = null;
+    if (this._serialize) {
+      const serialize = this._serialize;
+      const deferredTx = tx;
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => {
+          if (!deferredTx.afterSnapshot) {
+            const t0c = performance.now();
+            deferredTx.afterSnapshot = serialize();
+            this._lastSnapshot = deferredTx.afterSnapshot;
+            const dtc = performance.now() - t0c;
+            if (dtc > 5) console.log(`[HistoryManager] deferred afterSnapshot "${deferredTx.name}" ${dtc.toFixed(0)}ms (${(deferredTx.afterSnapshot!.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+          }
+        });
+      } else {
+        setTimeout(() => {
+          if (!deferredTx.afterSnapshot) {
+            deferredTx.afterSnapshot = serialize();
+            this._lastSnapshot = deferredTx.afterSnapshot;
+          }
+        }, 100);
+      }
+    }
 
     this.undoStack.push(tx);
 
@@ -123,6 +165,9 @@ export class HistoryManager implements IHistoryManager {
       this._deserialize(tx.beforeSnapshot);
     }
 
+    // Cache restored state for next beginTransaction
+    this._lastSnapshot = tx.beforeSnapshot;
+
     this.redoStack.push(tx);
     this.emitter.emit('changed');
     return { id: tx.id, name: tx.name, timestamp: tx.timestamp };
@@ -133,10 +178,19 @@ export class HistoryManager implements IHistoryManager {
 
     const tx = this.redoStack.pop()!;
 
+    // If deferred afterSnapshot hasn't been serialized yet, do it now
+    if (!tx.afterSnapshot && this._serialize) {
+      console.warn(`[HistoryManager] redo: afterSnapshot not ready, serializing now`);
+      tx.afterSnapshot = this._serialize();
+    }
+
     // Restore to the state AFTER this transaction
     if (this._deserialize && tx.afterSnapshot && tx.afterSnapshot.byteLength > 0) {
       this._deserialize(tx.afterSnapshot);
     }
+
+    // Cache restored state for next beginTransaction
+    this._lastSnapshot = tx.afterSnapshot;
 
     this.undoStack.push(tx);
     this.emitter.emit('changed');
@@ -167,6 +221,7 @@ export class HistoryManager implements IHistoryManager {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.activeTransaction = null;
+    this._lastSnapshot = null;
     this.emitter.emit('changed');
   }
 

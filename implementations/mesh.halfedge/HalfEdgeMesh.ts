@@ -293,6 +293,58 @@ export class HalfEdgeMesh {
   }
 
   /**
+   * Get all face IDs incident to a vertex (via half-edge adjacency).
+   * For bulk-imported meshes without half-edges, falls back to scanning all faces.
+   */
+  getVertexFaces(vertexId: string): string[] {
+    const heSet = this.vertexToHalfEdges.get(vertexId);
+    if (heSet && heSet.size > 0) {
+      const faceIds: string[] = [];
+      const seen = new Set<string>();
+      for (const heId of heSet) {
+        const he = this.halfEdges.get(heId);
+        if (he && he.faceId && !seen.has(he.faceId)) {
+          seen.add(he.faceId);
+          faceIds.push(he.faceId);
+        }
+      }
+      return faceIds;
+    }
+    // Fallback for bulk-imported meshes: scan all faces
+    const result: string[] = [];
+    for (const [faceId, face] of this.faces) {
+      if (face.vertexIds.includes(vertexId)) result.push(faceId);
+    }
+    return result;
+  }
+
+  /**
+   * Get all edge IDs incident to a vertex (returns string IDs).
+   */
+  getVertexEdgeIds(vertexId: string): string[] {
+    const result: string[] = [];
+    const seen = new Set<string>();
+    const heSet = this.vertexToHalfEdges.get(vertexId);
+    if (heSet && heSet.size > 0) {
+      for (const heId of heSet) {
+        const he = this.halfEdges.get(heId);
+        if (he && !seen.has(he.edgeId)) {
+          seen.add(he.edgeId);
+          result.push(he.edgeId);
+        }
+      }
+    }
+    // Also check edges directly (for edges without half-edges, e.g. bulk import)
+    for (const [edgeId, edge] of this.edges) {
+      if ((edge.startVertexId === vertexId || edge.endVertexId === vertexId) && !seen.has(edgeId)) {
+        seen.add(edgeId);
+        result.push(edgeId);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Get all edges incident to a vertex.
    */
   getVertexEdges(vertexId: string): IEdge[] {
@@ -636,11 +688,13 @@ export class HalfEdgeMesh {
    * Export the mesh state as an IMesh.
    */
   toMesh(): IMesh {
+    // Return internal maps directly (read-only access assumed).
+    // Copying 800K+ entries per call was a major perf bottleneck (~300ms per sync).
     return {
-      vertices: new Map(this.vertices),
-      edges: new Map(this.edges),
-      faces: new Map(this.faces),
-      halfEdges: new Map(this.halfEdges),
+      vertices: this.vertices,
+      edges: this.edges,
+      faces: this.faces,
+      halfEdges: this.halfEdges,
     };
   }
 

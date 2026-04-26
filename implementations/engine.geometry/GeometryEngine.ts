@@ -11,7 +11,7 @@ import { HalfEdgeMesh } from '../mesh.halfedge/HalfEdgeMesh';
 
 // ─── Binary format constants ────────────────────────────────────
 const MAGIC = 0x534B4347; // 'SKCG'
-const VERSION = 1;
+const VERSION = 2;
 
 // Vertex hit radius for raycasting (world units)
 const VERTEX_HIT_RADIUS = 0.05;
@@ -24,6 +24,13 @@ const EDGE_HIT_RADIUS = 0.02;
  */
 export class GeometryEngine implements IGeometryEngine {
   private mesh: HalfEdgeMesh;
+
+  /**
+   * Optional guard: returns true if the given face/edge ID is in a protected component
+   * and should NOT be intersected/split by new geometry.
+   * Set by Application after scene manager is initialized.
+   */
+  isProtectedEntity: ((entityId: string) => boolean) | null = null;
 
   constructor() {
     this.mesh = new HalfEdgeMesh();
@@ -119,6 +126,9 @@ export class GeometryEngine implements IGeometryEngine {
     const faceIds = [...this.mesh.faces.keys()];
 
     for (const faceId of faceIds) {
+      // Skip faces in protected components
+      if (this.isProtectedEntity?.(faceId)) continue;
+
       const face = this.mesh.faces.get(faceId);
       if (!face) continue;
       const verts = face.vertexIds;
@@ -279,6 +289,9 @@ export class GeometryEngine implements IGeometryEngine {
    */
   private findBisectedFace(v1Id: string, v2Id: string): string | null {
     for (const [faceId, face] of this.mesh.faces) {
+      // Skip faces in protected components
+      if (this.isProtectedEntity?.(faceId)) continue;
+
       const verts = face.vertexIds;
       const idx1 = verts.indexOf(v1Id);
       const idx2 = verts.indexOf(v2Id);
@@ -424,12 +437,14 @@ export class GeometryEngine implements IGeometryEngine {
       if (exists) continue;
 
       // MINIMAL LOOP CHECK 1: skip if any two non-adjacent loop vertices
-      // have an edge between them (a "chord").
+      // have an unprotected edge between them (a "chord").
+      // Protected (component) edges don't count as chords.
       let hasChord = false;
       for (let i = 0; i < loop.length && !hasChord; i++) {
         for (let j = i + 2; j < loop.length; j++) {
           if (i === 0 && j === loop.length - 1) continue;
-          if (this.mesh.findEdgeBetween(loop[i], loop[j])) {
+          const chord = this.mesh.findEdgeBetween(loop[i], loop[j]);
+          if (chord && !this.isProtectedEntity?.(chord.id)) {
             hasChord = true;
             break;
           }
@@ -495,6 +510,13 @@ export class GeometryEngine implements IGeometryEngine {
       const vertEdges = this.mesh.getVertexEdges(vid);
       if (vertEdges.length === 0) continue;
 
+      // Skip vertices that only belong to protected components — they shouldn't
+      // prevent face creation for unprotected geometry
+      if (this.isProtectedEntity) {
+        const allProtected = vertEdges.every(e => this.isProtectedEntity!(e.id));
+        if (allProtected) continue;
+      }
+
       // Project to 2D and do point-in-polygon test (ray casting)
       const pu = vec3.dot(vec3.sub(vert.position, pos[0]), axisU);
       const pv = vec3.dot(vec3.sub(vert.position, pos[0]), axisV);
@@ -528,6 +550,9 @@ export class GeometryEngine implements IGeometryEngine {
     const faceIds = [...this.mesh.faces.keys()];
 
     for (const faceId of faceIds) {
+      // Skip faces in protected components
+      if (this.isProtectedEntity?.(faceId)) continue;
+
       const face = this.mesh.faces.get(faceId);
       if (!face) continue;
 
@@ -661,6 +686,7 @@ export class GeometryEngine implements IGeometryEngine {
     vertices: Vec3[],
     faces: number[][],
     standaloneEdges?: [number, number][],
+    faceHoleStarts?: (number[] | undefined)[],
   ): { vertexIds: string[]; faceIds: string[] } {
     // For very large models (>10K faces), skip edge extraction to save ~30%+ memory.
     // These models use batched rendering (view-only, no per-entity selection).
@@ -717,10 +743,27 @@ export class GeometryEngine implements IGeometryEngine {
       survivingInputIndices.push(fi);
 
       if (!skipEdges) {
-        for (let i = 0; i < cleaned.length; i++) {
-          const a = cleaned[i], b = cleaned[(i + 1) % cleaned.length];
-          const k = edgeKey(a, b);
-          if (!edgeSet!.has(k)) { edgeSet!.add(k); edgePairs.push([a, b]); }
+        // Create edges per loop (outer + holes) to avoid bridge edges
+        const holes = faceHoleStarts?.[fi];
+        if (holes && holes.length > 0) {
+          // Build loop boundaries: [0, hole0, hole1, ..., cleaned.length]
+          const loopStarts = [0, ...holes, cleaned.length];
+          for (let li = 0; li < loopStarts.length - 1; li++) {
+            const start = loopStarts[li];
+            const end = loopStarts[li + 1];
+            for (let i = start; i < end; i++) {
+              const a = cleaned[i];
+              const b = cleaned[i + 1 < end ? i + 1 : start];
+              const k = edgeKey(a, b);
+              if (!edgeSet!.has(k)) { edgeSet!.add(k); edgePairs.push([a, b]); }
+            }
+          }
+        } else {
+          for (let i = 0; i < cleaned.length; i++) {
+            const a = cleaned[i], b = cleaned[(i + 1) % cleaned.length];
+            const k = edgeKey(a, b);
+            if (!edgeSet!.has(k)) { edgeSet!.add(k); edgePairs.push([a, b]); }
+          }
         }
       }
     }
@@ -788,6 +831,16 @@ export class GeometryEngine implements IGeometryEngine {
 
   getVertexEdges(vertexId: string): IEdge[] {
     return this.mesh.getVertexEdges(vertexId);
+  }
+
+  /** Get face IDs incident to a vertex (for dirty-tracking adjacency). */
+  getVertexFaces(vertexId: string): string[] {
+    return this.mesh.getVertexFaces(vertexId);
+  }
+
+  /** Get edge IDs incident to a vertex (for dirty-tracking adjacency). */
+  getVertexEdgeIds(vertexId: string): string[] {
+    return this.mesh.getVertexEdgeIds(vertexId);
   }
 
   getEdgeFaces(edgeId: string): IFace[] {
@@ -1200,6 +1253,13 @@ export class GeometryEngine implements IGeometryEngine {
       const holes = f.holeStartIndices || [];
       pushU32(holes.length);
       for (const hi of holes) pushU32(hi);
+      // UVs (texture coordinates from OBJ import)
+      const uvs = f.uvs || [];
+      pushU32(uvs.length);
+      for (const uv of uvs) {
+        pushF64(uv.u);
+        pushF64(uv.v);
+      }
     }
 
     // Half-edges
@@ -1274,7 +1334,7 @@ export class GeometryEngine implements IGeometryEngine {
     const magic = readU32();
     if (magic !== MAGIC) throw new Error('Invalid geometry data: bad magic number');
     const version = readU32();
-    if (version !== VERSION) throw new Error(`Unsupported geometry version: ${version}`);
+    if (version !== 1 && version !== 2) throw new Error(`Unsupported geometry version: ${version}`);
 
     const numVertices = readU32();
     const numEdges = readU32();
@@ -1337,6 +1397,18 @@ export class GeometryEngine implements IGeometryEngine {
       const holeStartIndices: number[] = [];
       for (let j = 0; j < numHoles; j++) holeStartIndices.push(readU32());
 
+      // UVs (version 2+)
+      let uvs: Array<{ u: number; v: number }> | undefined;
+      if (version >= 2) {
+        const numUVs = readU32();
+        if (numUVs > 0) {
+          uvs = [];
+          for (let j = 0; j < numUVs; j++) {
+            uvs.push({ u: readF64(), v: readF64() });
+          }
+        }
+      }
+
       const normal: Vec3 = { x: nx, y: ny, z: nz };
       const f: IFace = {
         id, vertexIds, normal,
@@ -1345,6 +1417,7 @@ export class GeometryEngine implements IGeometryEngine {
         generation: 0,
       };
       if (holeStartIndices.length > 0) f.holeStartIndices = holeStartIndices;
+      if (uvs) f.uvs = uvs;
       this.mesh.faces.set(id, f);
     }
 
