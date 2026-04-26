@@ -1,14 +1,48 @@
 // skp2obj — Converts SketchUp .skp to Wavefront OBJ+MTL using the SketchUp C API.
 // Exports geometry with materials (colors + textures) and UV coordinates.
 // Usage: skp2obj input.skp output.obj
+//
+// Build (macOS):  cc -o skp2obj skp2obj.c -L/path/to/sdk -lSketchUpAPI -rpath @executable_path
+// Build (Windows/MinGW): x86_64-w64-mingw32-gcc -o skp2obj.exe skp2obj.c -L. -lSketchUpAPI
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libgen.h>
 #include <sys/stat.h>
 
-// ─── Minimal SketchUp C API type declarations ────────────���──────
+// ─── Platform-specific path helpers ─────────────────────────────
+
+#ifdef _WIN32
+
+static void get_dirname(char *dst, const char *path, size_t max) {
+    strncpy(dst, path, max - 1);
+    dst[max - 1] = '\0';
+    char *last_fwd = strrchr(dst, '/');
+    char *last_bck = strrchr(dst, '\\');
+    char *last = last_fwd > last_bck ? last_fwd : last_bck;
+    if (last) *last = '\0';
+    else strcpy(dst, ".");
+}
+
+static void get_basename(char *dst, const char *path, size_t max) {
+    const char *last_fwd = strrchr(path, '/');
+    const char *last_bck = strrchr(path, '\\');
+    const char *last = last_fwd > last_bck ? last_fwd : last_bck;
+    const char *base = last ? last + 1 : path;
+    strncpy(dst, base, max - 1);
+    dst[max - 1] = '\0';
+}
+
+#define PATH_SEP "\\"
+
+#else
+
+#include <libgen.h>
+#define PATH_SEP "/"
+
+#endif
+
+// ─── Minimal SketchUp C API type declarations ──────────────────
 
 typedef int SUResult;
 #define SU_ERROR_NONE 0
@@ -28,7 +62,8 @@ typedef SURef SUTextureRef;
 typedef SURef SUStringRef;
 typedef SURef SUUVHelperRef;
 typedef SURef SUTextureWriterRef;
-typedef SURef SUModelRef;
+typedef SURef SUDrawingElementRef;
+typedef SURef SUMeshHelperRef;
 
 #define SU_INVALID (SURef){NULL}
 #define SUIsInvalid(ref) ((ref).ptr == NULL)
@@ -41,65 +76,87 @@ typedef struct { double x, y, z, w; } SUUVQ;
 
 // ─── API function declarations ──────────────────────────────────
 
-extern void SUInitialize(void);
-extern void SUTerminate(void);
+#ifdef _WIN32
+#define SU_API __declspec(dllimport)
+#else
+#define SU_API extern
+#endif
 
-extern SUResult SUModelCreateFromFile(SUModelRef *model, const char *path);
-extern SUResult SUModelRelease(SUModelRef *model);
-extern SUResult SUModelGetEntities(SUModelRef model, SUEntitiesRef *entities);
-extern SUResult SUModelGetNumMaterials(SUModelRef model, size_t *count);
-extern SUResult SUModelGetMaterials(SUModelRef model, size_t len, SUMaterialRef *mats, size_t *count);
+SU_API void SUInitialize(void);
+SU_API void SUTerminate(void);
 
-extern SUResult SUEntitiesGetNumFaces(SUEntitiesRef entities, size_t *count);
-extern SUResult SUEntitiesGetFaces(SUEntitiesRef entities, size_t len, SUFaceRef *faces, size_t *count);
-extern SUResult SUEntitiesGetNumEdges(SUEntitiesRef entities, int standalone_only, size_t *count);
-extern SUResult SUEntitiesGetEdges(SUEntitiesRef entities, int standalone_only, size_t len, SUEdgeRef *edges, size_t *count);
-extern SUResult SUEntitiesGetNumGroups(SUEntitiesRef entities, size_t *count);
-extern SUResult SUEntitiesGetGroups(SUEntitiesRef entities, size_t len, SUGroupRef *groups, size_t *count);
-extern SUResult SUEntitiesGetNumInstances(SUEntitiesRef entities, size_t *count);
-extern SUResult SUEntitiesGetInstances(SUEntitiesRef entities, size_t len, SUComponentInstanceRef *instances, size_t *count);
+SU_API SUResult SUModelCreateFromFile(SUModelRef *model, const char *path);
+SU_API SUResult SUModelRelease(SUModelRef *model);
+SU_API SUResult SUModelGetEntities(SUModelRef model, SUEntitiesRef *entities);
+SU_API SUResult SUModelGetNumMaterials(SUModelRef model, size_t *count);
+SU_API SUResult SUModelGetMaterials(SUModelRef model, size_t len, SUMaterialRef *mats, size_t *count);
 
-extern SUResult SUFaceGetNumVertices(SUFaceRef face, size_t *count);
-extern SUResult SUFaceGetVertices(SUFaceRef face, size_t len, SUVertexRef *vertices, size_t *count);
-extern SUResult SUFaceGetOuterLoop(SUFaceRef face, SULoopRef *loop);
-extern SUResult SUFaceGetNumInnerLoops(SUFaceRef face, size_t *count);
-extern SUResult SUFaceGetInnerLoops(SUFaceRef face, size_t len, SULoopRef *loops, size_t *count);
-extern SUResult SUFaceGetFrontMaterial(SUFaceRef face, SUMaterialRef *material);
-extern SUResult SUFaceGetUVHelper(SUFaceRef face, int front, int back, SUTextureWriterRef tw, SUUVHelperRef *uvh);
+SU_API SUResult SUEntitiesGetNumFaces(SUEntitiesRef entities, size_t *count);
+SU_API SUResult SUEntitiesGetFaces(SUEntitiesRef entities, size_t len, SUFaceRef *faces, size_t *count);
+SU_API SUResult SUEntitiesGetNumEdges(SUEntitiesRef entities, int standalone_only, size_t *count);
+SU_API SUResult SUEntitiesGetEdges(SUEntitiesRef entities, int standalone_only, size_t len, SUEdgeRef *edges, size_t *count);
+SU_API SUResult SUEntitiesGetNumGroups(SUEntitiesRef entities, size_t *count);
+SU_API SUResult SUEntitiesGetGroups(SUEntitiesRef entities, size_t len, SUGroupRef *groups, size_t *count);
+SU_API SUResult SUEntitiesGetNumInstances(SUEntitiesRef entities, size_t *count);
+SU_API SUResult SUEntitiesGetInstances(SUEntitiesRef entities, size_t len, SUComponentInstanceRef *instances, size_t *count);
 
-extern SUResult SULoopGetNumVertices(SULoopRef loop, size_t *count);
-extern SUResult SULoopGetVertices(SULoopRef loop, size_t len, SUVertexRef *vertices, size_t *count);
+SU_API SUResult SUFaceGetNumVertices(SUFaceRef face, size_t *count);
+SU_API SUResult SUFaceGetVertices(SUFaceRef face, size_t len, SUVertexRef *vertices, size_t *count);
+SU_API SUResult SUFaceGetOuterLoop(SUFaceRef face, SULoopRef *loop);
+SU_API SUResult SUFaceGetNumInnerLoops(SUFaceRef face, size_t *count);
+SU_API SUResult SUFaceGetInnerLoops(SUFaceRef face, size_t len, SULoopRef *loops, size_t *count);
+SU_API SUResult SUFaceGetFrontMaterial(SUFaceRef face, SUMaterialRef *material);
+SU_API SUResult SUFaceGetBackMaterial(SUFaceRef face, SUMaterialRef *material);
+SU_API SUResult SUFaceGetUVHelper(SUFaceRef face, int front, int back, SUTextureWriterRef tw, SUUVHelperRef *uvh);
 
-extern SUResult SUVertexGetPosition(SUVertexRef vertex, SUPoint3D *position);
+SU_API SUResult SULoopGetNumVertices(SULoopRef loop, size_t *count);
+SU_API SUResult SULoopGetVertices(SULoopRef loop, size_t len, SUVertexRef *vertices, size_t *count);
 
-extern SUResult SUEdgeGetStartVertex(SUEdgeRef edge, SUVertexRef *vertex);
-extern SUResult SUEdgeGetEndVertex(SUEdgeRef edge, SUVertexRef *vertex);
+SU_API SUResult SUVertexGetPosition(SUVertexRef vertex, SUPoint3D *position);
 
-extern SUResult SUGroupGetEntities(SUGroupRef group, SUEntitiesRef *entities);
-extern SUComponentInstanceRef SUGroupToComponentInstance(SUGroupRef group);
+SU_API SUResult SUEdgeGetStartVertex(SUEdgeRef edge, SUVertexRef *vertex);
+SU_API SUResult SUEdgeGetEndVertex(SUEdgeRef edge, SUVertexRef *vertex);
 
-extern SUResult SUComponentInstanceGetTransform(SUComponentInstanceRef instance, SUTransformation *transform);
-extern SUResult SUComponentInstanceGetDefinition(SUComponentInstanceRef instance, SUComponentDefinitionRef *def);
-extern SUResult SUComponentDefinitionGetEntities(SUComponentDefinitionRef def, SUEntitiesRef *entities);
+SU_API SUResult SUGroupGetEntities(SUGroupRef group, SUEntitiesRef *entities);
+SU_API SUComponentInstanceRef SUGroupToComponentInstance(SUGroupRef group);
 
-extern SUResult SUMaterialGetName(SUMaterialRef material, SUStringRef *name);
-extern SUResult SUMaterialGetColor(SUMaterialRef material, SUColor *color);
-extern SUResult SUMaterialGetTexture(SUMaterialRef material, SUTextureRef *texture);
-extern SUResult SUMaterialGetColorizeType(SUMaterialRef material, int *type);
+SU_API SUResult SUComponentInstanceGetTransform(SUComponentInstanceRef instance, SUTransformation *transform);
+SU_API SUResult SUComponentInstanceGetDefinition(SUComponentInstanceRef instance, SUComponentDefinitionRef *def);
+SU_API SUResult SUComponentDefinitionGetEntities(SUComponentDefinitionRef def, SUEntitiesRef *entities);
+SU_API SUResult SUComponentDefinitionGetName(SUComponentDefinitionRef def, SUStringRef *name);
+SU_API SUResult SUComponentInstanceGetName(SUComponentInstanceRef instance, SUStringRef *name);
+SU_API SUResult SUGroupGetName(SUGroupRef group, SUStringRef *name);
 
-extern SUResult SUTextureGetFileName(SUTextureRef texture, SUStringRef *file_name);
-extern SUResult SUTextureWriteToFile(SUTextureRef texture, const char *file_path);
+SU_API SUDrawingElementRef SUComponentInstanceToDrawingElement(SUComponentInstanceRef instance);
+SU_API SUResult SUDrawingElementGetMaterial(SUDrawingElementRef elem, SUMaterialRef *material);
 
-extern SUResult SUStringCreate(SUStringRef *out_string_ref);
-extern SUResult SUStringRelease(SUStringRef *string_ref);
-extern SUResult SUStringGetUTF8Length(SUStringRef string_ref, size_t *out_length);
-extern SUResult SUStringGetUTF8(SUStringRef string_ref, size_t max_length, char *out_char_array, size_t *out_length);
+SU_API SUResult SUMaterialGetName(SUMaterialRef material, SUStringRef *name);
+SU_API SUResult SUMaterialGetColor(SUMaterialRef material, SUColor *color);
+SU_API SUResult SUMaterialGetTexture(SUMaterialRef material, SUTextureRef *texture);
+SU_API SUResult SUMaterialGetColorizeType(SUMaterialRef material, int *type);
 
-extern SUResult SUUVHelperRelease(SUUVHelperRef *uvh);
-extern SUResult SUUVHelperGetFrontUVQ(SUUVHelperRef uvh, SUPoint3D *point, SUUVQ *uvq);
+SU_API SUResult SUTextureGetFileName(SUTextureRef texture, SUStringRef *file_name);
+SU_API SUResult SUTextureWriteToFile(SUTextureRef texture, const char *file_path);
 
-extern SUResult SUTextureWriterCreate(SUTextureWriterRef *writer);
-extern SUResult SUTextureWriterRelease(SUTextureWriterRef *writer);
+SU_API SUResult SUStringCreate(SUStringRef *out_string_ref);
+SU_API SUResult SUStringRelease(SUStringRef *string_ref);
+SU_API SUResult SUStringGetUTF8Length(SUStringRef string_ref, size_t *out_length);
+SU_API SUResult SUStringGetUTF8(SUStringRef string_ref, size_t max_length, char *out_char_array, size_t *out_length);
+
+SU_API SUResult SUUVHelperRelease(SUUVHelperRef *uvh);
+SU_API SUResult SUUVHelperGetFrontUVQ(SUUVHelperRef uvh, SUPoint3D *point, SUUVQ *uvq);
+
+SU_API SUResult SUTextureWriterCreate(SUTextureWriterRef *writer);
+SU_API SUResult SUTextureWriterRelease(SUTextureWriterRef *writer);
+
+SU_API SUResult SUMeshHelperCreate(SUMeshHelperRef *mesh, SUFaceRef face);
+SU_API SUResult SUMeshHelperRelease(SUMeshHelperRef *mesh);
+SU_API SUResult SUMeshHelperGetNumTriangles(SUMeshHelperRef mesh, size_t *count);
+SU_API SUResult SUMeshHelperGetNumVertices(SUMeshHelperRef mesh, size_t *count);
+SU_API SUResult SUMeshHelperGetVertices(SUMeshHelperRef mesh, size_t len, SUPoint3D *vertices, size_t *count);
+SU_API SUResult SUMeshHelperGetVertexIndices(SUMeshHelperRef mesh, size_t len, size_t *indices, size_t *count);
+SU_API SUResult SUMeshHelperGetNormals(SUMeshHelperRef mesh, size_t len, SUPoint3D *normals, size_t *count);
+SU_API SUResult SUMeshHelperGetFrontSTQCoords(SUMeshHelperRef mesh, size_t len, SUPoint3D *stq, size_t *count);
 
 // ─── Globals ────────────────────────────────────────────────────
 
@@ -115,10 +172,18 @@ static struct {
     int written;
 } g_materials[MAX_MATERIALS];
 static int g_num_materials = 0;
+static int g_group_counter = 0;
 
 static const char *g_current_material = NULL;
 
-// ─── Helpers ──────────────────────────────────────���─────────────
+// Diagnostic counters
+static int g_faces_with_front_mat = 0;
+static int g_faces_with_back_mat = 0;
+static int g_faces_with_inherited_mat = 0;
+static int g_faces_with_default_mat = 0;
+static int g_instances_with_mat = 0;
+
+// ─── Helpers ────────────────────────────────────────────────────
 
 static char *su_string_to_cstr(SUStringRef str) {
     size_t len = 0;
@@ -163,10 +228,15 @@ static void multiply_transforms(SUTransformation *out, SUTransformation *a, SUTr
 
 // ─── Get material name from a face ──────────────────────────────
 
-static const char *get_face_material_name(SUFaceRef face) {
+static const char *get_face_material_name(SUFaceRef face, int *was_back) {
+    *was_back = 0;
     SUMaterialRef mat = SU_INVALID;
-    if (SUFaceGetFrontMaterial(face, &mat) != SU_ERROR_NONE || SUIsInvalid(mat))
-        return NULL;
+    if (SUFaceGetFrontMaterial(face, &mat) != SU_ERROR_NONE || SUIsInvalid(mat)) {
+        // Try back face material as fallback
+        if (SUFaceGetBackMaterial(face, &mat) != SU_ERROR_NONE || SUIsInvalid(mat))
+            return NULL;
+        *was_back = 1;
+    }
 
     SUStringRef nameRef = SU_INVALID;
     SUStringCreate(&nameRef);
@@ -196,18 +266,62 @@ static const char *get_face_material_name(SUFaceRef face) {
     return NULL;
 }
 
+// ─── Get material name from a component instance ────────────────
+
+static const char *get_instance_material_name(SUComponentInstanceRef instance) {
+    SUDrawingElementRef de = SUComponentInstanceToDrawingElement(instance);
+    if (SUIsInvalid(de)) return NULL;
+
+    SUMaterialRef mat = SU_INVALID;
+    if (SUDrawingElementGetMaterial(de, &mat) != SU_ERROR_NONE || SUIsInvalid(mat))
+        return NULL;
+
+    SUStringRef nameRef = SU_INVALID;
+    SUStringCreate(&nameRef);
+    if (SUMaterialGetName(mat, &nameRef) != SU_ERROR_NONE) {
+        SUStringRelease(&nameRef);
+        return NULL;
+    }
+
+    char *raw = su_string_to_cstr(nameRef);
+    SUStringRelease(&nameRef);
+
+    static char sanitized[256];
+    sanitize_name(sanitized, raw, sizeof(sanitized));
+    free(raw);
+
+    // Register in material list if not already there
+    for (int i = 0; i < g_num_materials; i++) {
+        if (strcmp(g_materials[i].name, sanitized) == 0) {
+            g_instances_with_mat++;
+            return g_materials[i].name;
+        }
+    }
+    if (g_num_materials < MAX_MATERIALS) {
+        strncpy(g_materials[g_num_materials].name, sanitized, 255);
+        g_materials[g_num_materials].written = 0;
+        g_num_materials++;
+        g_instances_with_mat++;
+        return g_materials[g_num_materials - 1].name;
+    }
+    return NULL;
+}
+
 // ─── Write a single face ────────────────────────────────────────
 
-static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform) {
-    SULoopRef loop = SU_INVALID;
-    if (SUFaceGetOuterLoop(face, &loop) != SU_ERROR_NONE) return;
-
-    size_t num_verts = 0;
-    SULoopGetNumVertices(loop, &num_verts);
-    if (num_verts < 3) return;
-
-    // Emit usemtl if material changed
-    const char *matName = get_face_material_name(face);
+static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform, const char *inherited_material) {
+    // Material assignment
+    int was_back = 0;
+    const char *matName = get_face_material_name(face, &was_back);
+    if (matName) {
+        if (was_back) g_faces_with_back_mat++;
+        else g_faces_with_front_mat++;
+    }
+    if (!matName && inherited_material) {
+        matName = inherited_material;
+        g_faces_with_inherited_mat++;
+    }
+    if (!matName) g_faces_with_default_mat++;
     if (matName) {
         if (!g_current_material || strcmp(g_current_material, matName) != 0) {
             fprintf(out, "usemtl %s\n", matName);
@@ -218,110 +332,189 @@ static void write_face(FILE *out, SUFaceRef face, SUTransformation *transform) {
         g_current_material = NULL;
     }
 
-    SUVertexRef *vertices = (SUVertexRef *)malloc(num_verts * sizeof(SUVertexRef));
-    SULoopGetVertices(loop, num_verts, vertices, &num_verts);
-
-    // Try to get UV coordinates — need TextureWriter for proper UV mapping
-    SUUVHelperRef uvh = SU_INVALID;
-    int has_uvs = 0;
-
-    // Check if face has a textured material before attempting UV extraction
-    SUMaterialRef face_mat = SU_INVALID;
-    SUTextureRef face_tex = SU_INVALID;
-    int face_has_texture = 0;
-    if (SUFaceGetFrontMaterial(face, &face_mat) == SU_ERROR_NONE && !SUIsInvalid(face_mat)) {
-        if (SUMaterialGetTexture(face_mat, &face_tex) == SU_ERROR_NONE && !SUIsInvalid(face_tex)) {
-            face_has_texture = 1;
-        }
-    }
-
-    if (face_has_texture) {
-        // Create a temporary TextureWriter for proper UV mapping
-        SUTextureWriterRef tw = SU_INVALID;
-        SUTextureWriterCreate(&tw);
-        has_uvs = (SUFaceGetUVHelper(face, 1, 0, tw, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh));
-        if (!SUIsInvalid(tw)) SUTextureWriterRelease(&tw);
-    }
-
-    // First pass: collect positions (untransformed for UV query)
-    SUPoint3D *positions = (SUPoint3D *)malloc(num_verts * sizeof(SUPoint3D));
-    for (size_t i = 0; i < num_verts; i++) {
-        SUVertexGetPosition(vertices[i], &positions[i]);
-    }
-
-    // Write UVs (query with untransformed positions)
-    // SUUVQ layout: x=u, y=v, z=q (divisor), w=unused
-    if (has_uvs) {
-        for (size_t i = 0; i < num_verts; i++) {
-            SUUVQ uvq = {0,0,0,0};
-            if (SUUVHelperGetFrontUVQ(uvh, &positions[i], &uvq) == SU_ERROR_NONE
-                && uvq.z != 0.0
-                && uvq.x == uvq.x && uvq.y == uvq.y) {  // NaN check
-                fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.z, uvq.y / uvq.z);
-            } else {
-                fprintf(out, "vt 0 0\n");
-            }
-        }
-        SUUVHelperRelease(&uvh);
-    }
-
-    // Write vertex positions (transformed)
-    for (size_t i = 0; i < num_verts; i++) {
-        apply_transform(&positions[i], transform);
-        fprintf(out, "v %.6f %.6f %.6f\n",
-                positions[i].x * 0.0254, positions[i].y * 0.0254, positions[i].z * 0.0254);
-    }
-
-    free(positions);
-
-    // Write face with or without UV indices
-    fprintf(out, "f");
-    for (size_t i = 0; i < num_verts; i++) {
-        if (has_uvs) {
-            fprintf(out, " %d/%d", (int)(g_vertex_offset + i), (int)(g_uv_offset + i));
-        } else {
-            fprintf(out, " %d", (int)(g_vertex_offset + i));
-        }
-    }
-    fprintf(out, "\n");
-
-    g_vertex_offset += (int)num_verts;
-    if (has_uvs) g_uv_offset += (int)num_verts;
-    free(vertices);
-
-    // Inner loops (holes)
+    // Check for inner loops (holes)
     size_t num_inner = 0;
     SUFaceGetNumInnerLoops(face, &num_inner);
-    if (num_inner > 0) {
+
+    if (num_inner == 0) {
+        // ── Simple face: export outer loop as a single polygon ──
+        SULoopRef outer = SU_INVALID;
+        if (SUFaceGetOuterLoop(face, &outer) != SU_ERROR_NONE) return;
+
+        size_t num_verts = 0;
+        SULoopGetNumVertices(outer, &num_verts);
+        if (num_verts < 3) return;
+
+        SUVertexRef *verts = (SUVertexRef *)malloc(num_verts * sizeof(SUVertexRef));
+        SULoopGetVertices(outer, num_verts, verts, &num_verts);
+
+        // Get UVs via UVHelper if face has a texture
+        int has_uvs = 0;
+        SUUVHelperRef uvh = SU_INVALID;
+        SUMaterialRef face_mat = SU_INVALID;
+        SUTextureRef face_tex = SU_INVALID;
+        if (SUFaceGetFrontMaterial(face, &face_mat) == SU_ERROR_NONE && !SUIsInvalid(face_mat)) {
+            if (SUMaterialGetTexture(face_mat, &face_tex) == SU_ERROR_NONE && !SUIsInvalid(face_tex)) {
+                SUTextureWriterRef tw = SU_INVALID;
+                if (SUFaceGetUVHelper(face, 1, 0, tw, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
+                    has_uvs = 1;
+                }
+            }
+        }
+
+        // Write vertices and UVs
+        for (size_t i = 0; i < num_verts; i++) {
+            SUPoint3D pos;
+            SUVertexGetPosition(verts[i], &pos);
+            apply_transform(&pos, transform);
+
+            if (has_uvs) {
+                SUUVQ uvq = {0, 0, 0, 0};
+                SUPoint3D sample_pt;
+                SUVertexGetPosition(verts[i], &sample_pt);
+                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
+                    fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                } else {
+                    fprintf(out, "vt 0 0\n");
+                }
+            }
+
+            fprintf(out, "v %.6f %.6f %.6f\n",
+                    pos.x * 0.0254, pos.y * 0.0254, pos.z * 0.0254);
+        }
+
+        if (!SUIsInvalid(uvh)) SUUVHelperRelease(&uvh);
+        free(verts);
+
+        // Write single polygon face
+        fprintf(out, "f");
+        for (size_t i = 0; i < num_verts; i++) {
+            if (has_uvs) {
+                fprintf(out, " %d/%d",
+                        (int)(g_vertex_offset + i), (int)(g_uv_offset + i));
+            } else {
+                fprintf(out, " %d", (int)(g_vertex_offset + i));
+            }
+        }
+        fprintf(out, "\n");
+
+        g_vertex_offset += (int)num_verts;
+        if (has_uvs) g_uv_offset += (int)num_verts;
+
+    } else {
+        // ── Face with holes: export outer + inner loops as single polygon ──
+        SULoopRef outer = SU_INVALID;
+        if (SUFaceGetOuterLoop(face, &outer) != SU_ERROR_NONE) return;
+
+        size_t outer_count = 0;
+        SULoopGetNumVertices(outer, &outer_count);
+        if (outer_count < 3) return;
+
         SULoopRef *inner_loops = (SULoopRef *)malloc(num_inner * sizeof(SULoopRef));
         SUFaceGetInnerLoops(face, num_inner, inner_loops, &num_inner);
-        for (size_t li = 0; li < num_inner; li++) {
-            size_t nv = 0;
-            SULoopGetNumVertices(inner_loops[li], &nv);
-            if (nv < 3) continue;
-            SUVertexRef *iverts = (SUVertexRef *)malloc(nv * sizeof(SUVertexRef));
-            SULoopGetVertices(inner_loops[li], nv, iverts, &nv);
-            for (size_t i = 0; i < nv; i++) {
-                SUPoint3D pt;
-                SUVertexGetPosition(iverts[i], &pt);
-                apply_transform(&pt, transform);
-                fprintf(out, "v %.6f %.6f %.6f\n",
-                        pt.x * 0.0254, pt.y * 0.0254, pt.z * 0.0254);
-            }
-            fprintf(out, "l");
-            for (size_t i = 0; i < nv; i++)
-                fprintf(out, " %d", (int)(g_vertex_offset + i));
-            fprintf(out, " %d\n", g_vertex_offset);
-            g_vertex_offset += (int)nv;
-            free(iverts);
+
+        size_t total_verts = outer_count;
+        size_t *inner_counts = (size_t *)malloc(num_inner * sizeof(size_t));
+        for (size_t h = 0; h < num_inner; h++) {
+            inner_counts[h] = 0;
+            SULoopGetNumVertices(inner_loops[h], &inner_counts[h]);
+            total_verts += inner_counts[h];
         }
+
+        int has_uvs = 0;
+        SUUVHelperRef uvh = SU_INVALID;
+        SUMaterialRef face_mat = SU_INVALID;
+        SUTextureRef face_tex = SU_INVALID;
+        if (SUFaceGetFrontMaterial(face, &face_mat) == SU_ERROR_NONE && !SUIsInvalid(face_mat)) {
+            if (SUMaterialGetTexture(face_mat, &face_tex) == SU_ERROR_NONE && !SUIsInvalid(face_tex)) {
+                SUTextureWriterRef tw = SU_INVALID;
+                if (SUFaceGetUVHelper(face, 1, 0, tw, &uvh) == SU_ERROR_NONE && !SUIsInvalid(uvh)) {
+                    has_uvs = 1;
+                }
+            }
+        }
+
+        // Write outer loop vertices
+        SUVertexRef *verts = (SUVertexRef *)malloc(outer_count * sizeof(SUVertexRef));
+        SULoopGetVertices(outer, outer_count, verts, &outer_count);
+        for (size_t i = 0; i < outer_count; i++) {
+            SUPoint3D pos;
+            SUVertexGetPosition(verts[i], &pos);
+            apply_transform(&pos, transform);
+            if (has_uvs) {
+                SUUVQ uvq = {0, 0, 0, 0};
+                SUPoint3D sample_pt;
+                SUVertexGetPosition(verts[i], &sample_pt);
+                if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
+                    fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                } else {
+                    fprintf(out, "vt 0 0\n");
+                }
+            }
+            fprintf(out, "v %.6f %.6f %.6f\n",
+                    pos.x * 0.0254, pos.y * 0.0254, pos.z * 0.0254);
+        }
+        free(verts);
+
+        // Write inner loop vertices
+        for (size_t h = 0; h < num_inner; h++) {
+            size_t hcount = inner_counts[h];
+            verts = (SUVertexRef *)malloc(hcount * sizeof(SUVertexRef));
+            SULoopGetVertices(inner_loops[h], hcount, verts, &hcount);
+            for (size_t i = 0; i < hcount; i++) {
+                SUPoint3D pos;
+                SUVertexGetPosition(verts[i], &pos);
+                apply_transform(&pos, transform);
+                if (has_uvs) {
+                    SUUVQ uvq = {0, 0, 0, 0};
+                    SUPoint3D sample_pt;
+                    SUVertexGetPosition(verts[i], &sample_pt);
+                    if (SUUVHelperGetFrontUVQ(uvh, &sample_pt, &uvq) == SU_ERROR_NONE && uvq.w != 0.0) {
+                        fprintf(out, "vt %.6f %.6f\n", uvq.x / uvq.w, uvq.y / uvq.w);
+                    } else {
+                        fprintf(out, "vt 0 0\n");
+                    }
+                }
+                fprintf(out, "v %.6f %.6f %.6f\n",
+                        pos.x * 0.0254, pos.y * 0.0254, pos.z * 0.0254);
+            }
+            free(verts);
+        }
+
+        if (!SUIsInvalid(uvh)) SUUVHelperRelease(&uvh);
+
+        // Write hole start indices comment
+        fprintf(out, "# holes");
+        size_t offset = outer_count;
+        for (size_t h = 0; h < num_inner; h++) {
+            fprintf(out, " %d", (int)offset);
+            offset += inner_counts[h];
+        }
+        fprintf(out, "\n");
+
+        // Write single polygon face
+        fprintf(out, "f");
+        for (size_t i = 0; i < total_verts; i++) {
+            if (has_uvs) {
+                fprintf(out, " %d/%d",
+                        (int)(g_vertex_offset + i), (int)(g_uv_offset + i));
+            } else {
+                fprintf(out, " %d", (int)(g_vertex_offset + i));
+            }
+        }
+        fprintf(out, "\n");
+
         free(inner_loops);
+        free(inner_counts);
+
+        g_vertex_offset += (int)total_verts;
+        if (has_uvs) g_uv_offset += (int)total_verts;
     }
 }
 
 // ─── Write all entities recursively ─────────────────────────────
 
-static void write_entities(FILE *out, SUEntitiesRef entities, SUTransformation *parent_transform) {
+static void write_entities(FILE *out, SUEntitiesRef entities, SUTransformation *parent_transform, const char *inherited_material, const char *group_path) {
     // Faces
     size_t num_faces = 0;
     SUEntitiesGetNumFaces(entities, &num_faces);
@@ -329,7 +522,7 @@ static void write_entities(FILE *out, SUEntitiesRef entities, SUTransformation *
         SUFaceRef *faces = (SUFaceRef *)malloc(num_faces * sizeof(SUFaceRef));
         SUEntitiesGetFaces(entities, num_faces, faces, &num_faces);
         for (size_t i = 0; i < num_faces; i++)
-            write_face(out, faces[i], parent_transform);
+            write_face(out, faces[i], parent_transform, inherited_material);
         free(faces);
     }
 
@@ -371,9 +564,39 @@ static void write_entities(FILE *out, SUEntitiesRef entities, SUTransformation *
                 multiply_transforms(&combined, parent_transform, &local);
             else
                 combined = local;
+
+            // Emit OBJ group marker with group name
+            SUStringRef nameRef = SU_INVALID;
+            SUStringCreate(&nameRef);
+            char grp_name[256];
+            if (SUGroupGetName(groups[i], &nameRef) == SU_ERROR_NONE) {
+                char *raw = su_string_to_cstr(nameRef);
+                if (raw && raw[0] != '\0') {
+                    char base[256];
+                    sanitize_name(base, raw, sizeof(base));
+                    snprintf(grp_name, sizeof(grp_name), "%s_%d", base, ++g_group_counter);
+                } else {
+                    snprintf(grp_name, sizeof(grp_name), "Group_%d", ++g_group_counter);
+                }
+                free(raw);
+            } else {
+                snprintf(grp_name, sizeof(grp_name), "Group_%d", ++g_group_counter);
+            }
+            SUStringRelease(&nameRef);
+            char grp_full_path[1024];
+            if (group_path && group_path[0])
+                snprintf(grp_full_path, sizeof(grp_full_path), "%s/%s", group_path, grp_name);
+            else
+                snprintf(grp_full_path, sizeof(grp_full_path), "%s", grp_name);
+            fprintf(out, "g %s\n", grp_full_path);
+
+            const char *grp_mat = get_instance_material_name(inst);
+            if (!grp_mat) grp_mat = inherited_material;
             SUEntitiesRef grp_ents = SU_INVALID;
             SUGroupGetEntities(groups[i], &grp_ents);
-            write_entities(out, grp_ents, &combined);
+            write_entities(out, grp_ents, &combined, grp_mat, grp_full_path);
+
+            fprintf(out, "g default\n");
         }
         free(groups);
     }
@@ -393,17 +616,47 @@ static void write_entities(FILE *out, SUEntitiesRef entities, SUTransformation *
                 multiply_transforms(&combined, parent_transform, &local);
             else
                 combined = local;
+
+            // Emit OBJ group marker with component definition name
             SUComponentDefinitionRef def = SU_INVALID;
             SUComponentInstanceGetDefinition(instances[i], &def);
+            SUStringRef nameRef = SU_INVALID;
+            SUStringCreate(&nameRef);
+            char comp_name[256];
+            if (SUComponentDefinitionGetName(def, &nameRef) == SU_ERROR_NONE) {
+                char *raw = su_string_to_cstr(nameRef);
+                if (raw && raw[0] != '\0') {
+                    char base[256];
+                    sanitize_name(base, raw, sizeof(base));
+                    snprintf(comp_name, sizeof(comp_name), "%s_%d", base, ++g_group_counter);
+                } else {
+                    snprintf(comp_name, sizeof(comp_name), "Component_%d", ++g_group_counter);
+                }
+                free(raw);
+            } else {
+                snprintf(comp_name, sizeof(comp_name), "Component_%d", ++g_group_counter);
+            }
+            SUStringRelease(&nameRef);
+            char comp_full_path[1024];
+            if (group_path && group_path[0])
+                snprintf(comp_full_path, sizeof(comp_full_path), "%s/%s", group_path, comp_name);
+            else
+                snprintf(comp_full_path, sizeof(comp_full_path), "%s", comp_name);
+            fprintf(out, "g %s\n", comp_full_path);
+
+            const char *inst_mat = get_instance_material_name(instances[i]);
+            if (!inst_mat) inst_mat = inherited_material;
             SUEntitiesRef def_ents = SU_INVALID;
             SUComponentDefinitionGetEntities(def, &def_ents);
-            write_entities(out, def_ents, &combined);
+            write_entities(out, def_ents, &combined, inst_mat, comp_full_path);
+
+            fprintf(out, "g default\n");
         }
         free(instances);
     }
 }
 
-// ──�� Write MTL file ─────────────────────────────────────────────
+// ─── Write MTL file ─────────────────────────────────────────────
 
 static void write_mtl(SUModelRef model, const char *mtl_path) {
     FILE *mtl = fopen(mtl_path, "w");
@@ -457,16 +710,19 @@ static void write_mtl(SUModelRef model, const char *mtl_path) {
         // Texture
         SUTextureRef tex = SU_INVALID;
         if (SUMaterialGetTexture(mats[i], &tex) == SU_ERROR_NONE && !SUIsInvalid(tex)) {
-            // Write texture to file next to the MTL
             char tex_filename[512];
             snprintf(tex_filename, sizeof(tex_filename), "%s_%zu.png", sanitized, i);
 
             char tex_path[4096];
-            snprintf(tex_path, sizeof(tex_path), "%s/%s", g_out_dir, tex_filename);
+            snprintf(tex_path, sizeof(tex_path), "%s" PATH_SEP "%s", g_out_dir, tex_filename);
 
-            if (SUTextureWriteToFile(tex, tex_path) == SU_ERROR_NONE) {
+            SUResult tex_res = SUTextureWriteToFile(tex, tex_path);
+            if (tex_res == SU_ERROR_NONE) {
                 fprintf(mtl, "map_Kd %s\n", tex_filename);
-                fprintf(stderr, "[skp2obj] Exported texture: %s\n", tex_filename);
+                fprintf(stderr, "[skp2obj] Exported texture: %s -> %s\n", tex_filename, tex_path);
+            } else {
+                fprintf(stderr, "[skp2obj] FAILED to write texture: %s (error %d, path: %s)\n",
+                        tex_filename, tex_res, tex_path);
             }
         }
 
@@ -499,6 +755,9 @@ int main(int argc, char *argv[]) {
     }
 
     // Determine output directory for textures
+#ifdef _WIN32
+    get_dirname(g_out_dir, argv[2], sizeof(g_out_dir));
+#else
     {
         char tmp[4096];
         strncpy(tmp, argv[2], sizeof(tmp) - 1);
@@ -506,11 +765,13 @@ int main(int argc, char *argv[]) {
         char *dir = dirname(tmp);
         strncpy(g_out_dir, dir, sizeof(g_out_dir) - 1);
     }
+#endif
 
     // Write MTL file (same name as OBJ but .mtl extension)
     {
         char mtl_path[4096];
         strncpy(mtl_path, argv[2], sizeof(mtl_path) - 1);
+        mtl_path[sizeof(mtl_path) - 1] = '\0';
         size_t len = strlen(mtl_path);
         if (len > 4 && strcmp(mtl_path + len - 4, ".obj") == 0) {
             strcpy(mtl_path + len - 4, ".mtl");
@@ -519,11 +780,17 @@ int main(int argc, char *argv[]) {
         }
 
         // Derive MTL filename (basename only) for the mtllib directive
-        char tmp[4096];
-        strncpy(tmp, mtl_path, sizeof(tmp) - 1);
-        tmp[sizeof(tmp) - 1] = '\0';
-        char *base = basename(tmp);
-        strncpy(g_mtl_name, base, sizeof(g_mtl_name) - 1);
+#ifdef _WIN32
+        get_basename(g_mtl_name, mtl_path, sizeof(g_mtl_name));
+#else
+        {
+            char tmp[4096];
+            strncpy(tmp, mtl_path, sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
+            char *base = basename(tmp);
+            strncpy(g_mtl_name, base, sizeof(g_mtl_name) - 1);
+        }
+#endif
 
         write_mtl(model, mtl_path);
         fprintf(stderr, "[skp2obj] Wrote MTL: %s\n", mtl_path);
@@ -541,10 +808,13 @@ int main(int argc, char *argv[]) {
 
     SUEntitiesRef entities = SU_INVALID;
     SUModelGetEntities(model, &entities);
-    write_entities(out, entities, NULL);
+    write_entities(out, entities, NULL, NULL, NULL);
 
     fprintf(stderr, "[skp2obj] OK: %d vertices, %d UVs written to %s\n",
             g_vertex_offset - 1, g_uv_offset - 1, argv[2]);
+    fprintf(stderr, "[skp2obj] Material stats: front=%d back=%d inherited=%d default=%d instances_with_mat=%d\n",
+            g_faces_with_front_mat, g_faces_with_back_mat, g_faces_with_inherited_mat,
+            g_faces_with_default_mat, g_instances_with_mat);
 
 done:
     if (out) fclose(out);

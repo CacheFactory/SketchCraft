@@ -54,6 +54,9 @@ EXPORTS
     SUComponentInstanceGetTransform
     SUComponentInstanceGetDefinition
     SUComponentDefinitionGetEntities
+    SUComponentDefinitionGetName
+    SUComponentInstanceGetName
+    SUGroupGetName
     SUMaterialGetName
     SUMaterialGetColor
     SUMaterialGetTexture
@@ -68,6 +71,17 @@ EXPORTS
     SUUVHelperGetFrontUVQ
     SUTextureWriterCreate
     SUTextureWriterRelease
+    SUComponentInstanceToDrawingElement
+    SUDrawingElementGetMaterial
+    SUFaceGetBackMaterial
+    SUMeshHelperCreate
+    SUMeshHelperRelease
+    SUMeshHelperGetNumTriangles
+    SUMeshHelperGetNumVertices
+    SUMeshHelperGetVertices
+    SUMeshHelperGetVertexIndices
+    SUMeshHelperGetNormals
+    SUMeshHelperGetFrontSTQCoords
 EOF
 
 # Create import library from .def file
@@ -79,11 +93,11 @@ echo "=== Step 2: Cross-compile skp2obj for Windows ==="
 x86_64-w64-mingw32-gcc \
     -O2 \
     -o skp2obj_win.exe \
-    skp2obj_win.c \
+    ../tools/skp2obj.c \
     -L. -lSketchUpAPI \
     -Wl,--enable-stdcall-fixup
 
-echo "  Built skp2obj_win.exe"
+echo "  Built skp2obj_win.exe (from tools/skp2obj.c)"
 
 echo "=== Step 3: Verify SDK files ==="
 
