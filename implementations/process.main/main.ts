@@ -255,13 +255,20 @@ function registerIpcHandlers(): void {
   });
 
   // @archigraph file.skp
-  ipcMain.handle('file:convert-skp', async (_event, args: { filePath: string }) => {
+  ipcMain.handle('file:convert-skp', async (_event, args: { filePath: string; data?: ArrayBuffer }) => {
     // Convert .skp to .obj using the skp2obj tool (links against SketchUp C SDK)
     const toolPath = path.join(__dirname, '..', 'tools', 'skp2obj');
     const tmpObj = path.join(os.tmpdir(), `skp-${Date.now()}.obj`);
 
+    // If raw data was provided (e.g. fetched from URL), write to temp file first
+    let skpPath = args.filePath;
+    if (args.data) {
+      skpPath = path.join(os.tmpdir(), `skp-input-${Date.now()}.skp`);
+      fs.writeFileSync(skpPath, Buffer.from(args.data));
+    }
+
     return new Promise<{ data: ArrayBuffer; filePath: string } | null>((resolve) => {
-      execFile(toolPath, [args.filePath, tmpObj], { timeout: 300000, maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {
+      execFile(toolPath, [skpPath, tmpObj], { timeout: 300000, maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {
         if (err) {
           console.error('[skp2obj] conversion failed:', stderr || err.message);
           resolve(null);

@@ -1,6 +1,7 @@
 # DraftDown
 
 ### [Try DraftDown in your browser at draftdownapp.com](https://draftdownapp.com)
+### [View the interactive architecture diagram →](https://archigraph.ai/viewer?archigraph=https://raw.githubusercontent.com/CacheFactory/DraftDown/main/archigraph.yaml&schema=https://raw.githubusercontent.com/CacheFactory/DraftDown/main/schema.yaml)
 
 A free, open-source 3D modeling application inspired by SketchUp, built with Electron + React + Three.js. Draw 2D shapes, push/pull them into 3D solids, and build architectural models with an intuitive click-based workflow. Available as a desktop app (macOS, Windows, Linux) and a web app.
 

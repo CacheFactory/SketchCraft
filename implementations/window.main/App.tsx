@@ -12,8 +12,11 @@ import { ToolSettingsPanel } from './ToolSettingsPanel';
 import { ViewportCanvas } from '../viewport.main/ViewportCanvas';
 import { AIChatPanel } from '../ai.chat/AIChatPanel';
 import { PreferencesWindow } from '../window.preferences/PreferencesWindow';
+import { WelcomeModal } from './WelcomeModal';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 import { WebMenuBar } from '../../src/web/WebMenuBar';
+
+const EXAMPLE_SKP_URL = 'https://raw.githubusercontent.com/CacheFactory/DraftDown/main/examples/church.skp';
 
 function useIsWeb() {
   return typeof (window as any).__PLATFORM__ === 'string' && (window as any).__PLATFORM__ === 'web';
@@ -43,6 +46,7 @@ for (const [toolId, binding] of Object.entries(DEFAULT_PREFERENCES.shortcuts)) {
 function AppLayout() {
   const { theme, app, activateTool, undo, redo, updateState, syncToolState, syncPreviews } = useApp();
   const [prefsVisible, setPrefsVisible] = useState(false);
+  const [welcomeVisible, setWelcomeVisible] = useState(true);
   const isWeb = useIsWeb();
 
   // Handle keyboard shortcuts globally
@@ -240,6 +244,18 @@ function AppLayout() {
       <ContextMenu />
       <LoadingOverlay />
       <AIChatPanel />
+      <WelcomeModal
+        visible={welcomeVisible}
+        onNewProject={() => setWelcomeVisible(false)}
+        onOpenFile={() => {
+          setWelcomeVisible(false);
+          (app as any)?.openDocument();
+        }}
+        onLoadExample={() => {
+          setWelcomeVisible(false);
+          (app as any)?.loadSkpFromUrl(EXAMPLE_SKP_URL);
+        }}
+      />
       <PreferencesWindow visible={prefsVisible} onClose={() => setPrefsVisible(false)} onUnitsChanged={(u) => updateState({ units: u })} />
 
       <style>{`

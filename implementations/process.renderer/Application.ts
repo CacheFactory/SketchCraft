@@ -777,6 +777,28 @@ export class Application implements IApplication {
     return btoa(binary);
   }
 
+  /** Load a SKP file from a URL (for example models). */
+  async loadSkpFromUrl(url: string): Promise<void> {
+    try {
+      this.emitProgress('Downloading example model...', -1);
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const skpData = await resp.arrayBuffer();
+
+      this.emitProgress('Converting SKP file...', -1);
+      const converted = await window.api.invoke('file:convert-skp', { filePath: url.split('/').pop() || 'model.skp', data: skpData });
+      if (!converted) {
+        console.error('Failed to convert SKP file');
+        return;
+      }
+
+      await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
+      this.document.markClean();
+    } finally {
+      this.emitProgress('', 0, true);
+    }
+  }
+
   async importFile(): Promise<void> {
     if (typeof window.api === 'undefined') return;
     const result = await window.api.invoke('file:import', {
