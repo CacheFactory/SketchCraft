@@ -781,19 +781,24 @@ export class Application implements IApplication {
   async loadSkpFromUrl(url: string): Promise<void> {
     try {
       this.emitProgress('Downloading example model...', -1);
+      console.log('[loadSkpFromUrl] Fetching:', url);
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const skpData = await resp.arrayBuffer();
+      console.log(`[loadSkpFromUrl] Downloaded ${(skpData.byteLength / 1024).toFixed(0)}KB`);
 
       this.emitProgress('Converting SKP file...', -1);
       const converted = await window.api.invoke('file:convert-skp', { filePath: url.split('/').pop() || 'model.skp', data: skpData });
       if (!converted) {
-        console.error('Failed to convert SKP file');
+        console.error('[loadSkpFromUrl] SKP conversion returned null');
         return;
       }
+      console.log(`[loadSkpFromUrl] Converted, OBJ size: ${(converted.data.byteLength / 1024).toFixed(0)}KB`);
 
       await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
       this.document.markClean();
+    } catch (err) {
+      console.error('[loadSkpFromUrl] Error:', err);
     } finally {
       this.emitProgress('', 0, true);
     }

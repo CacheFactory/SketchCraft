@@ -264,8 +264,10 @@ function registerIpcHandlers(): void {
     let skpPath = args.filePath;
     if (args.data) {
       skpPath = path.join(os.tmpdir(), `skp-input-${Date.now()}.skp`);
+      console.log(`[skp2obj] Writing ${Buffer.from(args.data).byteLength} bytes to ${skpPath}`);
       fs.writeFileSync(skpPath, Buffer.from(args.data));
     }
+    console.log(`[skp2obj] Converting: ${skpPath} → ${tmpObj}`);
 
     return new Promise<{ data: ArrayBuffer; filePath: string } | null>((resolve) => {
       execFile(toolPath, [skpPath, tmpObj], { timeout: 300000, maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {

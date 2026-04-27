@@ -16,7 +16,7 @@ import { WelcomeModal } from './WelcomeModal';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
 import { WebMenuBar } from '../../src/web/WebMenuBar';
 
-const EXAMPLE_SKP_URL = 'https://raw.githubusercontent.com/CacheFactory/DraftDown/main/examples/church.skp';
+const EXAMPLE_SKP_URL = 'https://archigraph-releases-prod.s3.us-east-1.amazonaws.com/draftdown/examples/church.skp';
 
 function useIsWeb() {
   return typeof (window as any).__PLATFORM__ === 'string' && (window as any).__PLATFORM__ === 'web';
