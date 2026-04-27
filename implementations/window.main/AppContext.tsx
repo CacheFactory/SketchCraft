@@ -195,7 +195,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     app.document.history.undo();
-    if ('syncScene' in app) (app as any).syncScene();
+    if ('syncScene' in app) (app as any).syncScene(undefined, true);
     if ('syncSelection' in app) {
       const { entityIds, count } = (app as any).syncSelection();
       setState(prev => ({
@@ -214,7 +214,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const app = appRef.current;
     if (app) {
       app.document.history.redo();
-      if ('syncScene' in app) (app as any).syncScene();
+      if ('syncScene' in app) (app as any).syncScene(undefined, true);
       if ('syncSelection' in app) {
         const { entityIds, count } = (app as any).syncSelection();
         setState(prev => ({

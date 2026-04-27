@@ -197,11 +197,11 @@ export class Application implements IApplication {
    *  @param dirtyVertexIds - Optional set of vertex IDs that changed. When provided,
    *  sync uses adjacency to update only affected faces/edges instead of iterating all.
    */
-  syncScene(dirtyVertexIds?: Iterable<string>): void {
+  syncScene(dirtyVertexIds?: Iterable<string>, force?: boolean): void {
     if (dirtyVertexIds) {
       this.sceneBridge.markVerticesDirty(dirtyVertexIds);
     }
-    this.sceneBridge.sync();
+    this.sceneBridge.sync(force);
     this.syncDimensions();
   }
 
