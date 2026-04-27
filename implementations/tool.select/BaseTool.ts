@@ -175,11 +175,15 @@ export abstract class BaseTool implements ITool {
     return formatDistance(internalValue, getCurrentUnit());
   }
 
-  /** Begin an undo transaction. Also snapshots dimension state. */
-  protected beginTransaction(name: string): void {
+  /** Begin an undo transaction. Also snapshots dimension state.
+   *  Pass snapshotVertexIds for tools that mutate vertex positions directly. */
+  protected beginTransaction(name: string, snapshotVertexIds?: string[]): void {
     const { dimensionStore } = require('../tool.dimension/DimensionStore');
     dimensionStore.pushSnapshot();
     this.document.history.beginTransaction(name);
+    if (snapshotVertexIds?.length) {
+      (this.document.history as any).snapshotVertices(snapshotVertexIds);
+    }
   }
 
   /** Commit the current undo transaction. */

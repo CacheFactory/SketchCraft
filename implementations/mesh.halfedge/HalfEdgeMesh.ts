@@ -5,6 +5,8 @@ import { v4 as uuid } from 'uuid';
 import { IVertex, IEdge, IFace, IHalfEdge, IMesh } from '../../src/core/interfaces';
 import { Vec3 } from '../../src/core/types';
 import { vec3, EPSILON } from '../../src/core/math';
+import { TrackedMap } from '../data.history/TrackedMap';
+import { DeltaRecorder, cloneVertex, cloneEdge, cloneFace, cloneHalfEdge } from '../data.history/DeltaRecorder';
 
 /**
  * Half-edge mesh data structure providing efficient topological queries.
@@ -16,10 +18,10 @@ import { vec3, EPSILON } from '../../src/core/math';
  * - twin.originVertexId === the end vertex of this half-edge (i.e. next vertex in face loop).
  */
 export class HalfEdgeMesh {
-  vertices: Map<string, IVertex> = new Map();
-  edges: Map<string, IEdge> = new Map();
-  faces: Map<string, IFace> = new Map();
-  halfEdges: Map<string, IHalfEdge> = new Map();
+  vertices: TrackedMap<string, IVertex> = new TrackedMap('vertices', cloneVertex);
+  edges: TrackedMap<string, IEdge> = new TrackedMap('edges', cloneEdge);
+  faces: TrackedMap<string, IFace> = new TrackedMap('faces', cloneFace);
+  halfEdges: TrackedMap<string, IHalfEdge> = new TrackedMap('halfEdges', cloneHalfEdge);
 
   // Lookup acceleration: vertexId -> set of half-edge IDs originating from that vertex
   private vertexToHalfEdges: Map<string, Set<string>> = new Map();
@@ -28,6 +30,43 @@ export class HalfEdgeMesh {
 
   // Monotonically increasing counter for face generation tracking
   private _faceGeneration = 0;
+
+  // ─── Delta recording ──────────────────────────────────────────
+
+  setRecorder(recorder: DeltaRecorder | null): void {
+    this.vertices.setRecorder(recorder);
+    this.edges.setRecorder(recorder);
+    this.faces.setRecorder(recorder);
+    this.halfEdges.setRecorder(recorder);
+  }
+
+  /**
+   * Rebuild lookup maps (vertexToHalfEdges, edgeToHalfEdges) from halfEdges.
+   * Called after undo/redo to restore derived state.
+   */
+  rebuildLookups(): void {
+    this.vertexToHalfEdges.clear();
+    this.edgeToHalfEdges.clear();
+
+    // Initialize vertex lookup for all vertices
+    for (const [vId] of this.vertices) {
+      this.vertexToHalfEdges.set(vId, new Set());
+    }
+
+    // Initialize edge lookup for all edges
+    for (const [eId] of this.edges) {
+      this.edgeToHalfEdges.set(eId, []);
+    }
+
+    // Populate from half-edges
+    for (const [heId, he] of this.halfEdges) {
+      const vSet = this.vertexToHalfEdges.get(he.originVertexId);
+      if (vSet) vSet.add(heId);
+
+      const eList = this.edgeToHalfEdges.get(he.edgeId);
+      if (eList) eList.push(heId);
+    }
+  }
 
   // ─── Vertex operations ──────────────────────────────────────────
 
@@ -704,16 +743,22 @@ export class HalfEdgeMesh {
   clone(): HalfEdgeMesh {
     const mesh = new HalfEdgeMesh();
 
+    // Use Map.prototype.set to bypass TrackedMap recording during clone
+    const rawV = Map.prototype.set.bind(mesh.vertices);
+    const rawE = Map.prototype.set.bind(mesh.edges);
+    const rawF = Map.prototype.set.bind(mesh.faces);
+    const rawH = Map.prototype.set.bind(mesh.halfEdges);
+
     for (const [id, v] of this.vertices) {
-      mesh.vertices.set(id, { ...v, position: vec3.clone(v.position) });
+      rawV(id, { ...v, position: vec3.clone(v.position) });
       mesh.vertexToHalfEdges.set(id, new Set(this.vertexToHalfEdges.get(id)));
     }
     for (const [id, e] of this.edges) {
-      mesh.edges.set(id, { ...e });
+      rawE(id, { ...e });
       mesh.edgeToHalfEdges.set(id, [...(this.edgeToHalfEdges.get(id) || [])]);
     }
     for (const [id, f] of this.faces) {
-      mesh.faces.set(id, {
+      rawF(id, {
         ...f,
         vertexIds: [...f.vertexIds],
         normal: vec3.clone(f.normal),
@@ -721,7 +766,7 @@ export class HalfEdgeMesh {
       });
     }
     for (const [id, he] of this.halfEdges) {
-      mesh.halfEdges.set(id, { ...he });
+      rawH(id, { ...he });
     }
 
     return mesh;
@@ -739,13 +784,19 @@ export class HalfEdgeMesh {
     faceIndices: number[][],
     edgePairs: [number, number][], // pre-deduped [vertexIdx1, vertexIdx2] pairs
   ): { vertexIds: string[]; faceIds: string[] } {
+    // Bypass delta recording during bulk import — this is file load, not user edits.
+    // bulkAdd uses Map.prototype.set directly to skip TrackedMap overhead.
+    const rawVertexSet = Map.prototype.set.bind(this.vertices);
+    const rawEdgeSet = Map.prototype.set.bind(this.edges);
+    const rawFaceSet = Map.prototype.set.bind(this.faces);
+
     let counter = this.vertices.size + this.edges.size + this.faces.size;
 
     // 1. Vertices — simple numeric IDs, inline position (no clone)
     const vertexIds: string[] = new Array(positions.length);
     for (let i = 0; i < positions.length; i++) {
       const id = `v${counter++}`;
-      this.vertices.set(id, {
+      rawVertexSet(id, {
         id,
         position: { x: positions[i].x, y: positions[i].y, z: positions[i].z },
         selected: false,
@@ -758,7 +809,7 @@ export class HalfEdgeMesh {
     // 2. Edges from pre-deduped pairs (vertex indices → resolved IDs)
     for (let i = 0; i < edgePairs.length; i++) {
       const id = `e${counter++}`;
-      this.edges.set(id, {
+      rawEdgeSet(id, {
         id,
         startVertexId: vertexIds[edgePairs[i][0]],
         endVertexId: vertexIds[edgePairs[i][1]],
@@ -795,7 +846,7 @@ export class HalfEdgeMesh {
       const p0 = this.vertices.get(vIds[0])!.position;
 
       const id = `f${counter++}`;
-      this.faces.set(id, {
+      rawFaceSet(id, {
         id,
         vertexIds: vIds,
         normal,

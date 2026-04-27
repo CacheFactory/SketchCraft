@@ -36,6 +36,11 @@ export class GeometryEngine implements IGeometryEngine {
     this.mesh = new HalfEdgeMesh();
   }
 
+  /** Expose internal mesh for delta-based undo/redo wiring. */
+  getInternalMesh(): HalfEdgeMesh {
+    return this.mesh;
+  }
+
   // ─── Create operations ──────────────────────────────────────────
 
   createVertex(position: Vec3): IVertex {

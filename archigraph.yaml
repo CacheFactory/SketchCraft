@@ -1758,32 +1758,25 @@ nodes:
       complexity: complex
       status: implemented
     docs:
-      description: Snapshot-based undo/redo system. Each transaction captures full geometry state plus material face assignments
-        as a binary snapshot. Undo/redo restores both geometry and material assignments atomically.
-      notes: "## Typed Interface\n\n```typescript\nimport { MeshDelta } from '../geometry/mesh';\n\nexport interface Transaction\
-        \ {\n  readonly id: string;\n  readonly name: string; // human-readable: 'Push/Pull', 'Move', 'Draw Line'\n  readonly\
-        \ timestamp: number;\n  readonly deltas: Delta[]; // ordered list of changes\n}\n\nexport type Delta =\n  | { type:\
-        \ 'mesh'; meshId: string; delta: MeshDelta }\n  | { type: 'entity-add'; entity: SerializedEntity }\n  | { type: 'entity-remove';\
-        \ entity: SerializedEntity }\n  | { type: 'entity-change'; entityId: string; before: Partial<SerializedEntity>; after:\
-        \ Partial<SerializedEntity> }\n  | { type: 'material-change'; materialId: string; before: MaterialState; after: MaterialState\
-        \ }\n  | { type: 'selection-change'; before: string[]; after: string[] }\n  | { type: 'layer-change'; layerId: string;\
-        \ before: LayerState; after: LayerState };\n\nexport interface IHistoryManager {\n  // Transaction lifecycle\n  beginTransaction(name:\
-        \ string): Transaction;\n  commitTransaction(): void;\n  abortTransaction(): void; // rollback current transaction\n\
-        \  isInTransaction(): boolean;\n\n  // Record changes (called during a transaction)\n  recordMeshDelta(meshId: string,\
-        \ delta: MeshDelta): void;\n  recordEntityAdd(entity: SerializedEntity): void;\n  recordEntityRemove(entity: SerializedEntity):\
-        \ void;\n  recordEntityChange(entityId: string, before: Partial<SerializedEntity>, after: Partial<SerializedEntity>):\
-        \ void;\n\n  // Undo/Redo\n  undo(): Transaction | null; // returns undone transaction, null if nothing to undo\n\
-        \  redo(): Transaction | null;\n  canUndo(): boolean;\n  canRedo(): boolean;\n  getUndoName(): string | null; // 'Undo\
-        \ Push/Pull'\n  getRedoName(): string | null; // 'Redo Move'\n\n  // Stack inspection\n  getUndoStack(): ReadonlyArray<Transaction>;\n\
-        \  getRedoStack(): ReadonlyArray<Transaction>;\n  getTransactionCount(): number;\n\n  // Configuration\n  setMaxSteps(max:\
-        \ number): void;\n  clear(): void;\n\n  // Events\n  on(event: 'transaction-committed' | 'undo' | 'redo' | 'stack-changed',\
-        \ handler: (t: Transaction) => void): void;\n  off(event: string, handler: Function): void;\n}\n```\n\n## Design Decisions\n\
-        - **Delta-based, not snapshot-based**: Each transaction stores a minimal diff (MeshDelta), not a full model copy.\
-        \ Memory-efficient for large models.\n- **Copy-on-write**: MeshDelta uses copy-on-write for vertex position arrays.\
-        \ Only modified vertices are stored.\n- **Transaction grouping**: Complex operations (e.g., Follow Me creates many\
-        \ edges) are wrapped in a single transaction so one Ctrl+Z undoes the whole thing.\n- **Redo invalidation**: Any new\
-        \ action after undo clears the redo stack.\n- **Max steps**: Default 100 transactions. Oldest transactions are discarded\
-        \ when limit reached."
+      description: Delta-based undo/redo system. Each transaction records only what changed (add/delete/modify
+        deltas on mesh entity maps and material face assignments) rather than serializing the full geometry state.
+        TrackedMap subclasses intercept mutations on vertices, edges, faces, halfEdges, and faceAssignments.
+        Undo applies inverse deltas in reverse order; redo applies forward deltas. O(1) begin/commit for most
+        operations. Move/rotate/scale tools use snapshotVertices() for direct position mutations. ModelDocument
+        re-wires setTrackedSources() after any geometry.deserialize() call that replaces the internal mesh.
+      notes: "## Key Files\n- `DeltaRecorder.ts` — DeltaOp type, DeltaRecorder class, entity clone helpers\n\
+        - `TrackedMap.ts` — Map subclass that intercepts get/set/delete/iteration to capture deltas\n- `HistoryManager.ts`\
+        \ — Transaction lifecycle, applyInverse/applyForward, vertex snapshots\n\n## Design Decisions\n- **Delta-based**:\
+        \ Each transaction stores only changed entities (~KB), not full mesh snapshots (~57MB for large models).\n\
+        - **TrackedMap instrumentation**: Intercepts set(), delete(), get(), forEach(), entries(), values(),\
+        \ and [Symbol.iterator]() to capture before-snapshots on first access during a transaction.\n- **Deferred\
+        \ flush**: Add deltas are deferred to flushDeltas() at commit time to capture final entity state after\
+        \ in-place mutations (e.g., half-edge next/prev linking).\n- **Direct mutation support**: Move/rotate/scale\
+        \ tools write v.position.x/y/z directly; snapshotVertices() captures before-state, commit diffs against\
+        \ current.\n- **Lookup rebuild**: vertexToHalfEdges and edgeToHalfEdges are derived state, rebuilt via\
+        \ rebuildLookups() after undo/redo.\n- **Bulk import bypass**: bulkAdd() uses Map.prototype.set to skip\
+        \ recording during file import.\n- **Transaction grouping**: Complex operations wrapped in single transaction.\n\
+        - **Redo invalidation**: New action after undo clears redo stack.\n- **Max steps**: Default 100 transactions."
   uuid: sF6Q1SXe
 - id: file.native
   kind: file_format
@@ -3278,11 +3271,11 @@ nodes:
       complexity: moderate
       status: implemented
     docs:
-      description: 'Snapshot-based undo/redo system. Each tool transaction serializes the full geometry engine state (binary
-        ArrayBuffer) before and after the operation. Undo restores the "before" snapshot via geometry.deserialize(). Redo
-        restores the "after" snapshot. The HistoryManager stores up to 100 snapshots. Callbacks are wired by ModelDocument
-        via setSnapshotCallbacks(). Critical: newDocument() calls history.clear() instead of creating a new HistoryManager,
-        preserving the callbacks.'
+      description: 'Delta-based undo/redo system. TrackedMap intercepts all mutations on mesh entity maps (vertices,
+        edges, faces, halfEdges) and material faceAssignments. Each transaction records add/delete/modify deltas.
+        Undo applies inverse deltas in reverse order. Move/rotate/scale tools use snapshotVertices() for direct
+        position mutations. ModelDocument re-wires setTrackedSources() after newDocument() and deserialize()
+        since geometry.deserialize() replaces the internal HalfEdgeMesh.'
   uuid: sUndoSys
 - id: system.keyboard
   kind: service

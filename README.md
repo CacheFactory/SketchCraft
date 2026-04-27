@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/daa8530d-d3b9-4830-90af-bb2e815e5ce2
 - **Custom axes** — click a face to reorient drawing axes; all tools respect the custom orientation
 - **AI chat** — natural language modeling assistant with 30+ tools for geometry, materials, and queries
 - **Selection** — click, shift-click, or drag-box to select faces and edges
-- **Undo/Redo** — full snapshot-based undo history
+- **Undo/Redo** — delta-based undo history (records only what changed, instant for large models)
 - **Components** — group geometry into protected reusable components
 - **Layers** — organize geometry with visibility and locking
 - **Drawing planes** — arrow keys switch shape tool planes (ground, vertical walls)
@@ -166,7 +166,9 @@ implementations/
 │   └── SceneManager.ts        # Layers, components, entities
 ├── data.history/              # Undo/redo
 │   ├── CLAUDE.md
-│   └── HistoryManager.ts      # Snapshot-based
+│   ├── HistoryManager.ts      # Delta-based undo/redo
+│   ├── DeltaRecorder.ts       # Delta types and entity clone helpers
+│   └── TrackedMap.ts          # Map subclass that captures mutations
 ├── ... (60+ more node folders)
 
 tests/
@@ -194,7 +196,7 @@ tests/
 | `camera.main` | `implementations/camera.main/` | Camera controller |
 | `viewport.main` | `implementations/viewport.main/` | Viewport + raycasting |
 | `data.scene` | `implementations/data.scene/` | Layers, components |
-| `data.history` | `implementations/data.history/` | Snapshot undo/redo |
+| `data.history` | `implementations/data.history/` | Delta-based undo/redo |
 | `tool.*` | `implementations/tool.*/` | One folder per tool |
 
 ### System Diagram
@@ -227,7 +229,7 @@ tests/
 │  │  ├── engine.geometry/ (B-Rep half-edge mesh)    │    │
 │  │  ├── data.scene/     (layers, components)       │    │
 │  │  ├── data.selection/                            │    │
-│  │  ├── data.history/   (snapshot undo/redo)       │    │
+│  │  ├── data.history/   (delta-based undo/redo)    │    │
 │  │  └── data.materials/                            │    │
 │  └─────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
@@ -264,7 +266,7 @@ Edge lines are in the **overlay scene**, rendered in a separate pass after depth
 Camera `projectionMatrixInverse` is explicitly recomputed before every raycast. Line threshold is 0.05. Faces returned before edges. Preview/snap objects use `raycast = () => {}`.
 
 ### Undo/Redo
-Snapshot-based using `geometry.serialize()/deserialize()`. `newDocument()` calls `history.clear()` not `new HistoryManager()`. Line tool commits on deactivate.
+Delta-based using TrackedMap instrumentation on mesh entity maps. Each transaction records only add/delete/modify deltas (~KB) instead of full mesh snapshots (~57MB). TrackedMap overrides get/set/delete and all iteration methods (forEach, entries, values, Symbol.iterator) to capture before-snapshots. Move/rotate/scale tools use `snapshotVertices()` for direct position mutations. `newDocument()` re-wires `setTrackedSources()` since `deserialize()` replaces the internal mesh. Line tool commits on deactivate.
 
 ### Face Splitting
 `splitFaceWithPath()` handles arc endpoints ON face edges (not just corners) via proximity detection and vertex insertion. Both resulting faces include arc vertices on their shared boundary (no chord edge).

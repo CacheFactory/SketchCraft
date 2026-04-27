@@ -65,8 +65,8 @@ export class MoveTool extends BaseTool {
 
       this.origin = point;
       this.isCopy = event.ctrlKey;
-      this.beginTransaction(this.isCopy ? 'Copy' : 'Move');
       this.saveOriginalPositions();
+      this.beginTransaction(this.isCopy ? 'Copy' : 'Move', [...this.originalPositions.keys()]);
       this.setPhase('drawing');
       this.setStatus(`Drag to destination. ${this.isCopy ? '(Copy)' : ''}`);
     } else if (this.phase === 'drawing') {

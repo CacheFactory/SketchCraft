@@ -90,8 +90,8 @@ export class ScaleTool extends BaseTool {
 
       this.activeGrip = grip;
       this.startDist = 0;
-      this.beginTransaction('Scale');
       this.saveOriginal();
+      this.beginTransaction('Scale', [...this.originalPositions.keys()]);
       this.setPhase('drawing');
       this.setStatus('Drag to scale. Type factor and Enter for exact.');
     } else if (this.phase === 'drawing') {

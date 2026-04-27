@@ -93,8 +93,8 @@ export class RotateTool extends BaseTool {
         this.center = point;
       }
 
-      this.beginTransaction('Rotate');
       this.saveOriginal();
+      this.beginTransaction('Rotate', [...this.originalPositions.keys()]);
       this.clearHandles();
       this.drawProtractor();
       this.step = 1;

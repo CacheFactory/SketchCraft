@@ -6,6 +6,8 @@ import { SimpleEventEmitter } from '../../src/core/events';
 import { MaterialDef } from '../../src/core/types';
 import { IMaterialManager, IGeometryEngine } from '../../src/core/interfaces';
 import { generateBuiltinMaterials } from './ProceduralTextures';
+import { TrackedMap } from '../data.history/TrackedMap';
+import { DeltaRecorder, cloneFaceAssignment } from '../data.history/DeltaRecorder';
 
 // ─── Event map ───────────────────────────────────────────────────
 
@@ -38,7 +40,10 @@ export class MaterialManager implements IMaterialManager {
   private geometryEngine: IGeometryEngine | null;
 
   // Maps faceId -> { front: materialId, back: materialId }
-  private faceAssignments: Map<string, { front: string; back: string }> = new Map();
+  faceAssignments: TrackedMap<string, { front: string; back: string }> = new TrackedMap(
+    'faceAssignments',
+    cloneFaceAssignment,
+  );
 
   constructor(geometryEngine?: IGeometryEngine) {
     this.defaultMaterial = createDefaultMaterial();
@@ -46,6 +51,10 @@ export class MaterialManager implements IMaterialManager {
     this.materials.set(this.defaultMaterial.id, this.defaultMaterial);
     this.geometryEngine = geometryEngine ?? null;
     this.loadBuiltinMaterials();
+  }
+
+  setRecorder(recorder: DeltaRecorder | null): void {
+    this.faceAssignments.setRecorder(recorder);
   }
 
   private loadBuiltinMaterials(): void {
@@ -83,11 +92,11 @@ export class MaterialManager implements IMaterialManager {
 
     // Reassign faces using this material to default
     for (const [faceId, assignment] of this.faceAssignments) {
-      if (assignment.front === id) {
-        assignment.front = DEFAULT_MATERIAL_ID;
-      }
-      if (assignment.back === id) {
-        assignment.back = DEFAULT_MATERIAL_ID;
+      if (assignment.front === id || assignment.back === id) {
+        this.faceAssignments.set(faceId, {
+          front: assignment.front === id ? DEFAULT_MATERIAL_ID : assignment.front,
+          back: assignment.back === id ? DEFAULT_MATERIAL_ID : assignment.back,
+        });
       }
     }
 
@@ -118,17 +127,19 @@ export class MaterialManager implements IMaterialManager {
   applyToFace(faceId: string, materialId: string, backFace = false): void {
     if (!this.materials.has(materialId)) return;
 
-    let assignment = this.faceAssignments.get(faceId);
-    if (!assignment) {
-      assignment = { front: DEFAULT_MATERIAL_ID, back: DEFAULT_MATERIAL_ID };
-      this.faceAssignments.set(faceId, assignment);
-    }
+    const existing = this.faceAssignments.get(faceId);
+    const assignment = existing
+      ? { front: existing.front, back: existing.back }
+      : { front: DEFAULT_MATERIAL_ID, back: DEFAULT_MATERIAL_ID };
 
     if (backFace) {
       assignment.back = materialId;
     } else {
       assignment.front = materialId;
     }
+
+    // Always go through set() so TrackedMap captures the delta
+    this.faceAssignments.set(faceId, assignment);
 
     // Also update the geometry engine face materialIndex and bump generation
     if (this.geometryEngine) {

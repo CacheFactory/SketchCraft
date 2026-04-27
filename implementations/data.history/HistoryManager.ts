@@ -1,137 +1,146 @@
 // @archigraph svc.history_manager
-// Snapshot-based undo/redo. Each transaction stores a full geometry snapshot
-// taken before the operation. Undo restores the snapshot; redo reapplies.
+// Delta-based undo/redo. Each transaction stores only what changed (add/delete/modify
+// deltas), reducing both time and memory vs the previous snapshot approach.
 
 import { v4 as uuid } from 'uuid';
 import { SimpleEventEmitter } from '../../src/core/events';
 import { ITransaction, IHistoryManager } from '../../src/core/interfaces';
+import { Vec3 } from '../../src/core/types';
+import { DeltaRecorder, DeltaTransaction, DeltaOp, cloneVertex } from './DeltaRecorder';
+import type { HalfEdgeMesh } from '../mesh.halfedge/HalfEdgeMesh';
+import type { MaterialManager } from '../data.materials/MaterialManager';
 
-// ─── Snapshot transaction ────────────────────────────────────────
-
-interface SnapshotTransaction {
-  id: string;
-  name: string;
-  timestamp: number;
-  /** Geometry state BEFORE this transaction was committed. */
-  beforeSnapshot: ArrayBuffer;
-  /** Geometry state AFTER this transaction was committed. */
-  afterSnapshot: ArrayBuffer | null;
+function debugLog(_msg: string): void {
+  // Uncomment for debugging: console.warn(`[History] ${_msg}`);
 }
 
 type HistoryEvents = {
   'changed': [];
 };
 
-// ─── HistoryManager ──────────────────────────────────────────────
+// ─── HistoryManager ────────────���─────────────────────────────────
 
 export class HistoryManager implements IHistoryManager {
   maxSteps = 100;
 
-  private undoStack: SnapshotTransaction[] = [];
-  private redoStack: SnapshotTransaction[] = [];
-  private activeTransaction: SnapshotTransaction | null = null;
+  private undoStack: DeltaTransaction[] = [];
+  private redoStack: DeltaTransaction[] = [];
+  private activeTransaction: { id: string; name: string; timestamp: number; recorder: DeltaRecorder } | null = null;
   private emitter = new SimpleEventEmitter<HistoryEvents>();
 
-  /**
-   * Callback to capture and restore geometry state.
-   * Must be set by ModelDocument during initialization.
-   */
-  private _serialize: (() => ArrayBuffer) | null = null;
-  private _deserialize: ((data: ArrayBuffer) => void) | null = null;
+  // References to tracked data sources
+  private mesh: HalfEdgeMesh | null = null;
+  private materials: MaterialManager | null = null;
 
-  /**
-   * Cached snapshot of the current mesh state, set after each commit/undo/redo.
-   * Reused as the "before" snapshot in beginTransaction to avoid a synchronous
-   * serialize (~6800ms for 141K faces). Falls back to synchronous serialize
-   * if not available (first transaction or deferred callback hasn't fired yet).
-   */
-  private _lastSnapshot: ArrayBuffer | null = null;
+  // Vertex position snapshots for tools that mutate positions directly (move/rotate/scale)
+  private _vertexSnapshots: Map<string, Vec3> | null = null;
 
-  /** Wire up serialization/deserialization for snapshot-based undo/redo. */
-  setSnapshotCallbacks(
-    serialize: () => ArrayBuffer,
-    deserialize: (data: ArrayBuffer) => void,
-  ): void {
-    this._serialize = serialize;
-    this._deserialize = deserialize;
+  /** Wire up the tracked data sources. Call after construction and after deserialize. */
+  setTrackedSources(mesh: HalfEdgeMesh, materials: MaterialManager): void {
+    this.mesh = mesh;
+    this.materials = materials;
   }
 
-  // ── Transaction lifecycle ────────────────────────────────────
+  // ── Transaction lifecycle ────────────��───────────────────────
 
   beginTransaction(name: string): void {
     if (this.activeTransaction) {
-      // Silently commit the previous transaction instead of throwing
       this.commitTransaction();
     }
 
-    // Snapshot current state BEFORE the operation.
-    // Reuse cached snapshot if available (0ms), otherwise fall back to sync serialize.
-    let beforeSnapshot: ArrayBuffer;
-    if (this._lastSnapshot) {
-      beforeSnapshot = this._lastSnapshot;
-      this._lastSnapshot = null; // consumed
-      console.log(`[HistoryManager] beginTransaction "${name}" reused cached snapshot (${(beforeSnapshot.byteLength / 1024 / 1024).toFixed(1)}MB, 0ms)`);
-    } else {
-      const t0 = performance.now();
-      beforeSnapshot = this._serialize ? this._serialize() : new ArrayBuffer(0);
-      const dt = performance.now() - t0;
-      if (dt > 5) console.warn(`[HistoryManager] beginTransaction "${name}" serialize took ${dt.toFixed(0)}ms (${(beforeSnapshot.byteLength / 1024 / 1024).toFixed(1)}MB)`);
-    }
+    const recorder = new DeltaRecorder();
+
+    // Activate recording on mesh + materials
+    if (this.mesh) this.mesh.setRecorder(recorder);
+    if (this.materials) this.materials.setRecorder(recorder);
 
     this.activeTransaction = {
       id: uuid(),
       name,
       timestamp: Date.now(),
-      beforeSnapshot,
-      afterSnapshot: null,
+      recorder,
     };
+    debugLog(`beginTransaction "${name}" mesh: v=${this.mesh?.vertices.size} e=${this.mesh?.edges.size} f=${this.mesh?.faces.size} he=${this.mesh?.halfEdges.size}`);
+  }
+
+  /**
+   * Snapshot vertex positions for tools that write v.position.x/y/z directly
+   * without going through map.set(). Call immediately after beginTransaction.
+   */
+  snapshotVertices(vertexIds: string[]): void {
+    if (!this.mesh) return;
+    this._vertexSnapshots = new Map();
+    for (const vid of vertexIds) {
+      // Use Map.prototype.get to avoid triggering TrackedMap's get() snapshot.
+      // These vertices are tracked explicitly via _vertexSnapshots instead.
+      const v = Map.prototype.get.call(this.mesh.vertices, vid);
+      if (v) {
+        this._vertexSnapshots.set(vid, { x: v.position.x, y: v.position.y, z: v.position.z });
+      }
+    }
   }
 
   commitTransaction(): ITransaction {
     if (!this.activeTransaction) {
-      // No-op if nothing to commit
       return { id: uuid(), name: '(empty)', timestamp: Date.now() };
     }
 
-    const tx = this.activeTransaction;
+    const { id, name, timestamp, recorder } = this.activeTransaction;
     this.activeTransaction = null;
 
-    // Defer the "after" snapshot — it's only needed for redo, not undo.
-    // Serialize in an idle callback to avoid blocking the UI thread.
-    tx.afterSnapshot = null;
-    if (this._serialize) {
-      const serialize = this._serialize;
-      const deferredTx = tx;
-      if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(() => {
-          if (!deferredTx.afterSnapshot) {
-            const t0c = performance.now();
-            deferredTx.afterSnapshot = serialize();
-            this._lastSnapshot = deferredTx.afterSnapshot;
-            const dtc = performance.now() - t0c;
-            if (dtc > 5) console.log(`[HistoryManager] deferred afterSnapshot "${deferredTx.name}" ${dtc.toFixed(0)}ms (${(deferredTx.afterSnapshot!.byteLength / 1024 / 1024).toFixed(1)}MB)`);
-          }
-        });
-      } else {
-        setTimeout(() => {
-          if (!deferredTx.afterSnapshot) {
-            deferredTx.afterSnapshot = serialize();
-            this._lastSnapshot = deferredTx.afterSnapshot;
-          }
-        }, 100);
-      }
+    // Flush in-place modifications detected via get()-time snapshots
+    if (this.mesh) {
+      this.mesh.vertices.flushDeltas();
+      this.mesh.edges.flushDeltas();
+      this.mesh.faces.flushDeltas();
+      this.mesh.halfEdges.flushDeltas();
     }
+    if (this.materials) {
+      this.materials.faceAssignments.flushDeltas();
+    }
+
+    // Flush vertex position diffs for direct-mutation tools (move/rotate/scale)
+    // These tools write v.position.x/y/z directly without even calling get() on
+    // the TrackedMap — they hold cached references. The snapshotVertices() call
+    // captured positions at begin time; diff against current positions now.
+    if (this._vertexSnapshots && this.mesh) {
+      for (const [vid, before] of this._vertexSnapshots) {
+        const v = Map.prototype.get.call(this.mesh.vertices, vid);
+        if (!v) continue;
+        const after = v.position;
+        if (before.x !== after.x || before.y !== after.y || before.z !== after.z) {
+          recorder.record({
+            op: 'modify',
+            map: 'vertices',
+            key: vid,
+            before: cloneVertex({ ...v, position: before } as any),
+            after: cloneVertex(v),
+          });
+        }
+      }
+      this._vertexSnapshots = null;
+    }
+
+    // Deactivate recording
+    if (this.mesh) this.mesh.setRecorder(null);
+    if (this.materials) this.materials.setRecorder(null);
+
+    const tx: DeltaTransaction = {
+      id,
+      name,
+      timestamp,
+      deltas: recorder.deltas,
+    };
+
+    debugLog(`commit "${name}": ${tx.deltas.length} deltas`);
 
     this.undoStack.push(tx);
 
-    // Prune oldest when exceeding max steps
     while (this.undoStack.length > this.maxSteps) {
       this.undoStack.shift();
     }
 
-    // Clear redo stack on new commit
     this.redoStack.length = 0;
-
     this.emitter.emit('changed');
     return { id: tx.id, name: tx.name, timestamp: tx.timestamp };
   }
@@ -139,34 +148,49 @@ export class HistoryManager implements IHistoryManager {
   abortTransaction(): void {
     if (!this.activeTransaction) return;
 
-    // Restore state from before this transaction started
-    if (this._deserialize && this.activeTransaction.beforeSnapshot.byteLength > 0) {
-      this._deserialize(this.activeTransaction.beforeSnapshot);
+    const { recorder } = this.activeTransaction;
+    this.activeTransaction = null;
+
+    // Flush deferred deltas so applyInverse has the complete picture
+    if (this.mesh) {
+      this.mesh.vertices.flushDeltas();
+      this.mesh.edges.flushDeltas();
+      this.mesh.faces.flushDeltas();
+      this.mesh.halfEdges.flushDeltas();
+    }
+    if (this.materials) {
+      this.materials.faceAssignments.flushDeltas();
     }
 
-    this.activeTransaction = null;
+    // Deactivate recording
+    if (this.mesh) this.mesh.setRecorder(null);
+    if (this.materials) this.materials.setRecorder(null);
+
+    // Apply inverse deltas to restore state
+    this.applyInverse(recorder.deltas);
+
+    // Rebuild derived lookups
+    if (this.mesh) this.mesh.rebuildLookups();
+
+    this._vertexSnapshots = null;
   }
 
-  // ── Recording (no-op in snapshot mode, kept for interface compat) ──
+  // ── Recording (no-op — deltas are captured automatically by TrackedMaps) ──
 
   recordAdd(_entityType: string, _entityId: string, _data: unknown): void {}
   recordRemove(_entityType: string, _entityId: string, _data: unknown): void {}
   recordModify(_entityType: string, _entityId: string, _before: unknown, _after: unknown): void {}
 
-  // ── Undo / Redo ──────────────────────────────────────────────
+  // ── Undo / Redo ────────���─────────────────────────────────────
 
   undo(): ITransaction | null {
     if (!this.canUndo) return null;
 
     const tx = this.undoStack.pop()!;
+    debugLog(`undo "${tx.name}": ${tx.deltas.length} deltas`);
+    this.applyInverse(tx.deltas);
 
-    // Restore to the state BEFORE this transaction
-    if (this._deserialize && tx.beforeSnapshot.byteLength > 0) {
-      this._deserialize(tx.beforeSnapshot);
-    }
-
-    // Cache restored state for next beginTransaction
-    this._lastSnapshot = tx.beforeSnapshot;
+    if (this.mesh) this.mesh.rebuildLookups();
 
     this.redoStack.push(tx);
     this.emitter.emit('changed');
@@ -177,24 +201,72 @@ export class HistoryManager implements IHistoryManager {
     if (!this.canRedo) return null;
 
     const tx = this.redoStack.pop()!;
+    this.applyForward(tx.deltas);
 
-    // If deferred afterSnapshot hasn't been serialized yet, do it now
-    if (!tx.afterSnapshot && this._serialize) {
-      console.warn(`[HistoryManager] redo: afterSnapshot not ready, serializing now`);
-      tx.afterSnapshot = this._serialize();
-    }
-
-    // Restore to the state AFTER this transaction
-    if (this._deserialize && tx.afterSnapshot && tx.afterSnapshot.byteLength > 0) {
-      this._deserialize(tx.afterSnapshot);
-    }
-
-    // Cache restored state for next beginTransaction
-    this._lastSnapshot = tx.afterSnapshot;
+    if (this.mesh) this.mesh.rebuildLookups();
 
     this.undoStack.push(tx);
     this.emitter.emit('changed');
     return { id: tx.id, name: tx.name, timestamp: tx.timestamp };
+  }
+
+  // ── Delta application ────���─────────────────────────────────
+
+  private getMap(mapName: string): Map<string, unknown> | null {
+    if (!this.mesh && !this.materials) return null;
+    switch (mapName) {
+      case 'vertices': return this.mesh?.vertices ?? null;
+      case 'edges': return this.mesh?.edges ?? null;
+      case 'faces': return this.mesh?.faces ?? null;
+      case 'halfEdges': return this.mesh?.halfEdges ?? null;
+      case 'faceAssignments': return this.materials?.faceAssignments ?? null;
+      default: return null;
+    }
+  }
+
+  /** Apply deltas in forward order (for redo). Uses Map.prototype to bypass TrackedMap recording. */
+  private applyForward(deltas: DeltaOp[]): void {
+    for (let i = 0; i < deltas.length; i++) {
+      const d = deltas[i];
+      const map = this.getMap(d.map);
+      if (!map) continue;
+
+      switch (d.op) {
+        case 'add':
+          Map.prototype.set.call(map, d.key, d.value);
+          break;
+        case 'delete':
+          Map.prototype.delete.call(map, d.key);
+          break;
+        case 'modify':
+          Map.prototype.set.call(map, d.key, d.after);
+          break;
+      }
+    }
+  }
+
+  /** Apply inverse deltas in reverse order (for undo). Uses Map.prototype to bypass TrackedMap recording. */
+  private applyInverse(deltas: DeltaOp[]): void {
+    for (let i = deltas.length - 1; i >= 0; i--) {
+      const d = deltas[i];
+      const map = this.getMap(d.map);
+      if (!map) continue;
+
+      switch (d.op) {
+        case 'add':
+          // Inverse of add = delete
+          Map.prototype.delete.call(map, d.key);
+          break;
+        case 'delete':
+          // Inverse of delete = add back with original value
+          Map.prototype.set.call(map, d.key, d.value);
+          break;
+        case 'modify':
+          // Inverse of modify = restore before state
+          Map.prototype.set.call(map, d.key, d.before);
+          break;
+      }
+    }
   }
 
   // ── Accessors ────────────────────────────────────────────────
@@ -221,7 +293,7 @@ export class HistoryManager implements IHistoryManager {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.activeTransaction = null;
-    this._lastSnapshot = null;
+    this._vertexSnapshots = null;
     this.emitter.emit('changed');
   }
 
