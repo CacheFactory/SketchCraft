@@ -5,6 +5,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { WebPlatformBridge } from './WebPlatformBridge';
 import { App } from '../../implementations/window.main/App';
+import { MobileViewer } from './MobileViewer';
 import '../../implementations/window.main/global.css';
 
 // Install the web platform bridge so existing code that calls window.api works unchanged
@@ -22,19 +23,5 @@ function isMobile(): boolean {
     || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
 }
 
-function MobileMessage() {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      height: '100%', background: '#1e1e1e', color: '#eee', padding: '32px', textAlign: 'center',
-    }}>
-      <h1 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '12px' }}>DraftDown</h1>
-      <p style={{ fontSize: '15px', color: '#888', lineHeight: 1.5 }}>
-        View only on mobile.<br />Use a desktop browser to edit.
-      </p>
-    </div>
-  );
-}
-
 const root = createRoot(container);
-root.render(isMobile() ? <MobileMessage /> : <App />);
+root.render(isMobile() ? <MobileViewer /> : <App />);
