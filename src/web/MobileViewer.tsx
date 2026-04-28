@@ -11,7 +11,7 @@ export function MobileViewer() {
   const appRef = useRef<Application | null>(null);
   const [ready, setReady] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState<{ message: string; progress: number } | null>(null);
 
   // Listen for import-progress events from Application
   useEffect(() => {
@@ -20,7 +20,7 @@ export function MobileViewer() {
       if (detail.done) {
         setLoading(null);
       } else {
-        setLoading(detail.message || 'Loading...');
+        setLoading({ message: detail.message || 'Loading...', progress: detail.progress ?? -1 });
       }
     };
     window.addEventListener('import-progress', handler);
@@ -123,7 +123,7 @@ export function MobileViewer() {
     const app = appRef.current;
     if (!app) return;
     setShowWelcome(false);
-    setLoading('Loading example model...');
+    setLoading({ message: 'Loading example model...', progress: -1 });
     try {
       await app.loadSkpFromUrl(EXAMPLE_SKP_URL);
       app.viewport.camera.fitToBox(app.document.geometry.getBoundingBox());
@@ -167,7 +167,16 @@ export function MobileViewer() {
         <div className="mobile-loading">
           <div className="mobile-loading-card">
             <div className="mobile-spinner" />
-            <p>{loading}</p>
+            <p>{loading.message}</p>
+            <div className="mobile-progress-track">
+              {loading.progress >= 0 && loading.progress <= 1
+                ? <div className="mobile-progress-fill" style={{ width: `${Math.round(loading.progress * 100)}%` }} />
+                : <div className="mobile-progress-indeterminate" />
+              }
+            </div>
+            {loading.progress >= 0 && loading.progress <= 1 && (
+              <p className="mobile-progress-pct">{Math.round(loading.progress * 100)}%</p>
+            )}
           </div>
         </div>
       )}
@@ -238,6 +247,25 @@ export function MobileViewer() {
         }
         .mobile-loading-card p {
           font-size: 13px; color: #eee; margin: 12px 0 0;
+        }
+        .mobile-progress-track {
+          height: 6px; background: #333; border-radius: 3px;
+          overflow: hidden; margin-top: 14px;
+        }
+        .mobile-progress-fill {
+          height: 100%; background: #4488ff; border-radius: 3px;
+          transition: width 0.2s ease;
+        }
+        .mobile-progress-indeterminate {
+          height: 100%; width: 40%; background: #4488ff; border-radius: 3px;
+          animation: mprog 1.2s ease-in-out infinite;
+        }
+        @keyframes mprog {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(350%); }
+        }
+        .mobile-progress-pct {
+          font-size: 11px !important; color: #888 !important; margin: 6px 0 0 !important;
         }
         .mobile-spinner {
           width: 28px; height: 28px; margin: 0 auto;
