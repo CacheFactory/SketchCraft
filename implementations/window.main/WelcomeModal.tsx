@@ -30,7 +30,7 @@ export function WelcomeModal({ visible, onNewProject, onOpenFile, onLoadExample 
             <div className="welcome-option-icon">&uarr;</div>
             <div className="welcome-option-text">
               <div className="welcome-option-title">Open File</div>
-              <div className="welcome-option-desc">Load a .skp or .obj file</div>
+              <div className="welcome-option-desc">SKP, OBJ, STL, glTF, FBX, COLLADA, PLY, 3MF, DXF</div>
             </div>
           </button>
           <button className="welcome-option" onClick={onLoadExample}>

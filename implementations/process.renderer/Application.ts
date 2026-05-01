@@ -365,7 +365,7 @@ export class Application implements IApplication {
       } else if (ext === 'obj') {
         this.emitProgress('Loading file...', 0);
         await this.importOBJ(result.data, result.filePath);
-      } else if (ext && ['stl', 'gltf', 'glb', 'fbx', 'dae', 'ply', '3mf'].includes(ext)) {
+      } else if (ext && ['stl', 'gltf', 'glb', 'fbx', 'dae', 'ply', '3mf', 'dxf'].includes(ext)) {
         await this.importViaThreeJS(result.data, ext, result.filePath);
       } else {
         this.emitProgress('Loading file...', 0);
@@ -812,7 +812,7 @@ export class Application implements IApplication {
   async importFile(): Promise<void> {
     if (typeof window.api === 'undefined') return;
     const result = await window.api.invoke('file:import', {
-      formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.fbx', '.dae', '.ply', '.3mf'],
+      formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.fbx', '.dae', '.ply', '.3mf', '.dxf'],
     });
     if (!result) return;
 
@@ -872,6 +872,10 @@ export class Application implements IApplication {
       const { ThreeMFLoader } = await import('three/examples/jsm/loaders/3MFLoader.js');
       const loader = new ThreeMFLoader();
       object = loader.parse(data);
+    } else if (ext === 'dxf') {
+      const text = new TextDecoder().decode(data);
+      const geometry = this.parseDXFToGeometry(text);
+      object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
     } else {
       console.warn(`[import] Unsupported format: ${ext}`);
       return;
@@ -1014,6 +1018,79 @@ export class Application implements IApplication {
       a.click();
       URL.revokeObjectURL(url);
     }
+  }
+
+  /** Parse DXF text into a Three.js BufferGeometry (3DFACE, LINE, POLYLINE entities). */
+  private parseDXFToGeometry(text: string): THREE.BufferGeometry {
+    const lines = text.split(/\r?\n/);
+    const vertices: number[] = [];
+    const indices: number[] = [];
+
+    let i = 0;
+    const next = (): [number, string] => {
+      const code = parseInt(lines[i++]?.trim() || '0', 10);
+      const val = lines[i++]?.trim() || '';
+      return [code, val];
+    };
+
+    // Scan for ENTITIES section
+    while (i < lines.length) {
+      const [code, val] = next();
+      if (code === 2 && val === 'ENTITIES') break;
+    }
+
+    // Parse entities
+    while (i < lines.length) {
+      const [code, val] = next();
+      if (code === 0 && val === 'ENDSEC') break;
+
+      if (code === 0 && val === '3DFACE') {
+        const pts: number[][] = [[], [], [], []];
+        while (i < lines.length) {
+          const [c, v] = next();
+          if (c === 0) { i -= 2; break; } // next entity
+          const f = parseFloat(v);
+          // Group codes: 10-13 = X, 20-23 = Y, 30-33 = Z for vertices 0-3
+          if (c >= 10 && c <= 13) pts[c - 10][0] = f;
+          if (c >= 20 && c <= 23) pts[c - 20][1] = f;
+          if (c >= 30 && c <= 33) pts[c - 30][2] = f;
+        }
+        // Triangle 1: 0-1-2
+        const base = vertices.length / 3;
+        for (let p = 0; p < 3; p++) {
+          vertices.push(pts[p][0] || 0, pts[p][1] || 0, pts[p][2] || 0);
+        }
+        indices.push(base, base + 1, base + 2);
+        // Triangle 2 if quad (vertex 3 differs from vertex 2)
+        const p2 = pts[2], p3 = pts[3];
+        if (p3[0] !== undefined && (p3[0] !== p2[0] || p3[1] !== p2[1] || p3[2] !== p2[2])) {
+          vertices.push(p3[0] || 0, p3[1] || 0, p3[2] || 0);
+          indices.push(base, base + 2, base + 3);
+        }
+      }
+
+      if (code === 0 && val === 'LINE') {
+        const p0: number[] = [0, 0, 0];
+        const p1: number[] = [0, 0, 0];
+        while (i < lines.length) {
+          const [c, v] = next();
+          if (c === 0) { i -= 2; break; }
+          const f = parseFloat(v);
+          if (c === 10) p0[0] = f; if (c === 20) p0[1] = f; if (c === 30) p0[2] = f;
+          if (c === 11) p1[0] = f; if (c === 21) p1[1] = f; if (c === 31) p1[2] = f;
+        }
+        // Create a degenerate triangle for the line so it appears in the mesh
+        const base = vertices.length / 3;
+        vertices.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p1[0], p1[1], p1[2]);
+        indices.push(base, base + 1, base + 2);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return geometry;
   }
 
   /** Export Three.js scene to DXF format using 3DFACE entities. */

@@ -168,7 +168,7 @@ function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
-        { name: '3D Files', extensions: ['skp', 'obj', 'stl', 'gltf', 'glb', 'fbx', 'dae', 'ply', '3mf', 'skc'] },
+        { name: '3D Files', extensions: ['skp', 'obj', 'stl', 'gltf', 'glb', 'fbx', 'dae', 'ply', '3mf', 'dxf', 'skc'] },
         { name: 'SketchUp Files', extensions: ['skp'] },
         { name: 'DraftDown Files', extensions: ['skc'] },
         { name: 'All Files', extensions: ['*'] },
