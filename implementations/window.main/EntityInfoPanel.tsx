@@ -80,6 +80,25 @@ export function EntityInfoPanel() {
   const isEditingComponent = sm?.isEditingComponent ?? false;
   const editingComponentId = sm?.editingComponentId ?? null;
 
+  // Build breadcrumb trail: Scene > ComponentA > ComponentB > ...
+  const componentBreadcrumb: Array<{ id: string | null; name: string }> = [{ id: null, name: 'Scene' }];
+  if (sm?.editingComponentStack) {
+    for (const compId of sm.editingComponentStack) {
+      const comp = sm.components.get(compId);
+      componentBreadcrumb.push({ id: compId, name: comp?.name ?? 'Component' });
+    }
+  }
+  if (editingComponentId) {
+    const comp = sm.components.get(editingComponentId);
+    componentBreadcrumb.push({ id: editingComponentId, name: comp?.name ?? 'Component' });
+  }
+  // Also show selected component in the trail if it's selected but not being edited
+  if (selectedComponent && !isEditingComponent) {
+    componentBreadcrumb.push({ id: selectedComponentId, name: selectedComponent.name });
+  } else if (selectedComponent && selectedComponentId !== editingComponentId) {
+    componentBreadcrumb.push({ id: selectedComponentId, name: selectedComponent.name });
+  }
+
   const handleMakeComponent = () => {
     if (!sm || selectedEntityIds.length === 0) return;
     const name = `Component ${(sm.components?.size ?? 0) + 1}`;
@@ -119,11 +138,20 @@ export function EntityInfoPanel() {
 
       {!collapsed && (
         <div className="panel-body">
-          {/* Component editing banner */}
-          {isEditingComponent && (
-            <div className="component-edit-banner">
-              Editing: {sm.components.get(editingComponentId)?.name ?? 'Component'}
-              <button className="component-exit-btn" onClick={handleExitComponent}>Close</button>
+          {/* Component hierarchy breadcrumb */}
+          {componentBreadcrumb.length > 1 && (
+            <div className="component-breadcrumb">
+              {componentBreadcrumb.map((crumb, i) => (
+                <React.Fragment key={i}>
+                  {i > 0 && <span className="breadcrumb-sep">›</span>}
+                  <span className={`breadcrumb-item${i === componentBreadcrumb.length - 1 ? ' active' : ''}`}>
+                    {crumb.name}
+                  </span>
+                </React.Fragment>
+              ))}
+              {isEditingComponent && (
+                <button className="component-exit-btn" onClick={handleExitComponent}>↑ Exit</button>
+              )}
             </div>
           )}
 
@@ -232,17 +260,28 @@ export function EntityInfoPanel() {
         .entity-list-detail {
           color: var(--text-muted); font-family: monospace; font-size: 10px;
         }
-        .component-edit-banner {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 6px 8px; margin-bottom: 8px;
-          background: #9c27b0; color: white;
-          border-radius: 4px; font-size: 11px; font-weight: 500;
+        .component-breadcrumb {
+          display: flex; align-items: center; flex-wrap: wrap;
+          padding: 6px 8px; margin-bottom: 8px; gap: 2px;
+          background: var(--bg-tertiary); border-radius: 4px;
+          font-size: 11px; font-weight: 500;
+        }
+        .breadcrumb-sep {
+          color: var(--text-muted); margin: 0 2px; font-size: 12px;
+        }
+        .breadcrumb-item {
+          color: var(--text-secondary); font-size: 11px;
+        }
+        .breadcrumb-item.active {
+          color: #9c27b0; font-weight: 600;
         }
         .component-exit-btn {
-          background: rgba(255,255,255,0.2); color: white;
+          margin-left: auto;
+          background: rgba(156,39,176,0.15); color: #9c27b0;
           padding: 2px 8px; border-radius: 3px; font-size: 10px;
+          font-weight: 500;
         }
-        .component-exit-btn:hover { background: rgba(255,255,255,0.3); }
+        .component-exit-btn:hover { background: rgba(156,39,176,0.25); }
         .component-actions {
           display: flex; gap: 6px; margin-top: 8px;
         }
