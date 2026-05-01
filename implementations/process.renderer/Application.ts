@@ -53,6 +53,7 @@ export class Application implements IApplication {
   modelAPI!: IModelAPI;
 
   private initialized = false;
+  private _componentBBoxLines: string[] = [];
 
   async initialize(container: HTMLElement): Promise<void> {
     if (this.initialized) return;
@@ -294,21 +295,24 @@ export class Application implements IApplication {
       }
     }
 
-    // Resolve component IDs to their member face/edge IDs for highlighting
+    // Clear previous component bounding box wireframes
+    for (const lineId of this._componentBBoxLines) {
+      this.viewport.renderer.removeGuideLine(lineId);
+    }
+    this._componentBBoxLines = [];
+
+    // Resolve selection: individual entities get highlight, components get bounding box
     const highlightIds: string[] = [];
     for (const id of ids) {
       if (sm?.components?.has(id)) {
-        const comp = sm.components.get(id);
-        if (comp && comp.entityIds.size <= MAX_HIGHLIGHT_FACES) {
-          for (const eid of comp.entityIds) highlightIds.push(eid);
-        }
-        // Skip highlighting for components with too many faces
+        // Draw bounding box wireframe for this component
+        this._drawComponentBBox(id, sm);
       } else {
         highlightIds.push(id);
       }
     }
 
-    // Update 3D selection highlights
+    // Update 3D selection highlights (for non-component entities)
     const t1 = performance.now();
     this.viewport.renderer.setSelectionHighlight(highlightIds);
     const dt1 = performance.now() - t1;
@@ -334,6 +338,58 @@ export class Application implements IApplication {
     if (dtTotal > 2) console.warn(`[syncSelection] ${dtTotal.toFixed(1)}ms total — highlight: ${dt1.toFixed(1)}ms (${highlightIds.length} ids), presel: ${dt2.toFixed(1)}ms (${preSelHighlightIds.length} ids), sel: ${ids.length}`);
 
     return { entityIds: ids, count: ids.length };
+  }
+
+  /** Draw a bounding box wireframe around a selected component. */
+  private _drawComponentBBox(componentId: string, sm: any): void {
+    const comp = sm.components.get(componentId);
+    if (!comp) return;
+
+    // Compute bounding box from component's face vertices
+    const mesh = this.document.geometry.getMesh();
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let found = false;
+
+    for (const eid of comp.entityIds) {
+      const face = mesh.faces.get(eid);
+      if (!face) continue;
+      for (const vid of face.vertexIds) {
+        const v = mesh.vertices.get(vid);
+        if (!v) continue;
+        const p = v.position;
+        if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.z < minZ) minZ = p.z;
+        if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; if (p.z > maxZ) maxZ = p.z;
+        found = true;
+      }
+    }
+    if (!found) return;
+
+    // 8 corners of the bounding box
+    const c = [
+      { x: minX, y: minY, z: minZ }, // 0: front-bottom-left
+      { x: maxX, y: minY, z: minZ }, // 1: front-bottom-right
+      { x: maxX, y: maxY, z: minZ }, // 2: front-top-right
+      { x: minX, y: maxY, z: minZ }, // 3: front-top-left
+      { x: minX, y: minY, z: maxZ }, // 4: back-bottom-left
+      { x: maxX, y: minY, z: maxZ }, // 5: back-bottom-right
+      { x: maxX, y: maxY, z: maxZ }, // 6: back-top-right
+      { x: minX, y: maxY, z: maxZ }, // 7: back-top-left
+    ];
+
+    // 12 edges of the box
+    const edges: [number, number][] = [
+      [0,1],[1,2],[2,3],[3,0], // front face
+      [4,5],[5,6],[6,7],[7,4], // back face
+      [0,4],[1,5],[2,6],[3,7], // connecting edges
+    ];
+
+    const color = { r: 0.24, g: 0.47, b: 1.0 }; // selection blue
+    for (const [a, b] of edges) {
+      const id = `_comp_bbox_${componentId}_${a}_${b}`;
+      this.viewport.renderer.addGuideLine(id, c[a], c[b], color, false);
+      this._componentBBoxLines.push(id);
+    }
   }
 
   dispose(): void {
