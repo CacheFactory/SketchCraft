@@ -61,7 +61,7 @@ export class SceneManager implements ISceneManager {
    * Component system: groups of face/edge IDs that act as a single unit.
    * Component internals can't be selected or modified from the main scene.
    */
-  components: Map<string, { id: string; name: string; entityIds: Set<string> }> = new Map();
+  components: Map<string, { id: string; name: string; entityIds: Set<string>; parentComponentId: string | null }> = new Map();
 
   /** Which component is currently being edited (null = main scene). */
   editingComponentId: string | null = null;
@@ -416,7 +416,9 @@ export class SceneManager implements ISceneManager {
   /** Create a component from a set of face/edge IDs. */
   createComponent(name: string, entityIds: string[]): string {
     const id = uuid();
-    this.components.set(id, { id, name, entityIds: new Set(entityIds) });
+    // If currently editing a component, this new component is its child
+    const parentComponentId = this.editingComponentId;
+    this.components.set(id, { id, name, entityIds: new Set(entityIds), parentComponentId });
     this.emitter.emit('changed');
     return id;
   }
@@ -431,57 +433,44 @@ export class SceneManager implements ISceneManager {
     this.emitter.emit('changed');
   }
 
-  /** Get the component that contains this entity ID, or null.
-   *  Respects the component hierarchy like SketchUp:
-   *  - At the top level, returns the outermost (largest) component
-   *  - When editing a component, returns the direct child component
-   *    (smallest component that still contains entities not in deeper sub-components)
-   *  This means first click selects the top-level component, double-click enters it,
-   *  then you can select its direct children, and so on down the hierarchy. */
+  /** Get the component that should be selected when clicking this entity.
+   *  Respects the explicit parent-child hierarchy:
+   *  - At top level: returns the top-level component (parentComponentId === null)
+   *  - When editing component X: returns X's direct child component
+   *  This enforces drill-down: click selects component, double-click enters it,
+   *  then you can select its children, and so on. */
   getEntityComponent(entityId: string): string | null {
-    const editingComp = this.editingComponentId
-      ? this.components.get(this.editingComponentId) : null;
-
-    // Collect all components containing this entity
-    const containing: Array<{ id: string; size: number }> = [];
+    // Find all components containing this entity
+    const containing: string[] = [];
     for (const [compId, comp] of this.components) {
-      if (!comp.entityIds.has(entityId)) continue;
       if (compId === this.editingComponentId) continue;
-      containing.push({ id: compId, size: comp.entityIds.size });
+      if (comp.entityIds.has(entityId)) containing.push(compId);
     }
     if (containing.length === 0) return null;
 
-    if (!editingComp) {
-      // Top level: return the outermost (largest) component
-      let best = containing[0];
-      for (let i = 1; i < containing.length; i++) {
-        if (containing[i].size > best.size) best = containing[i];
-      }
-      return best.id;
+    // Find the component whose parent matches the current editing context
+    // At top level: look for parentComponentId === null
+    // When editing X: look for parentComponentId === X
+    const targetParent = this.editingComponentId;
+    for (const compId of containing) {
+      const comp = this.components.get(compId)!;
+      if (comp.parentComponentId === targetParent) return compId;
     }
 
-    // Editing a component: find the direct child component.
-    // Filter to only components that are subsets of the editing component.
-    const children: Array<{ id: string; size: number }> = [];
-    for (const c of containing) {
-      if (c.size >= editingComp.entityIds.size) continue;
-      const comp = this.components.get(c.id)!;
-      // Verify it's actually a subset
-      let isSubset = true;
-      for (const eid of comp.entityIds) {
-        if (!editingComp.entityIds.has(eid)) { isSubset = false; break; }
+    // If no direct child found, walk up: find the ancestor whose parent
+    // matches the target. This handles clicking on deeply nested geometry.
+    for (const compId of containing) {
+      let current = compId;
+      while (current) {
+        const comp = this.components.get(current);
+        if (!comp) break;
+        if (comp.parentComponentId === targetParent) return current;
+        if (!comp.parentComponentId) break;
+        current = comp.parentComponentId;
       }
-      if (isSubset) children.push(c);
     }
-    if (children.length === 0) return null;
 
-    // Return the largest child — this is the "direct" child in the hierarchy.
-    // (A direct child component is larger than its own sub-components.)
-    let best = children[0];
-    for (let i = 1; i < children.length; i++) {
-      if (children[i].size > best.size) best = children[i];
-    }
-    return best.id;
+    return null;
   }
 
   /** Check if an entity is inside a component and NOT currently being edited. */
