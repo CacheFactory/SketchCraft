@@ -362,13 +362,17 @@ export class Application implements IApplication {
           console.error('Failed to convert SKP file');
           return;
         }
+      } else if (ext === 'obj') {
+        this.emitProgress('Loading file...', 0);
+        await this.importOBJ(result.data, result.filePath);
+      } else if (ext && ['stl', 'gltf', 'glb', 'fbx', 'dae', 'ply', '3mf'].includes(ext)) {
+        await this.importViaThreeJS(result.data, ext, result.filePath);
       } else {
         this.emitProgress('Loading file...', 0);
         await this.importOBJ(result.data, result.filePath);
       }
       this.document.filePath = result.filePath;
       this.document.markClean();
-      // Scene sync is now handled inside importOBJ
     } finally {
       this.emitProgress('', 0, true);
     }
@@ -808,7 +812,7 @@ export class Application implements IApplication {
   async importFile(): Promise<void> {
     if (typeof window.api === 'undefined') return;
     const result = await window.api.invoke('file:import', {
-      formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.dxf', '.step', '.stp', '.fbx'],
+      formats: ['.skp', '.obj', '.stl', '.gltf', '.glb', '.fbx', '.dae', '.ply', '.3mf'],
     });
     if (!result) return;
 
@@ -816,21 +820,73 @@ export class Application implements IApplication {
     try {
       if (ext === 'skp') {
         this.emitProgress('Converting SKP file...', -1);
-        console.log('[import] Starting SKP conversion...');
         const converted = await (window.api as any).invoke('file:convert-skp', { filePath: result.filePath, data: result.data });
         if (converted) {
-          console.log(`[import] SKP converted, OBJ size: ${(converted.data.byteLength / 1024 / 1024).toFixed(1)}MB`);
           await this.importOBJ(converted.data, converted.filePath, { rotateSkp: true });
         }
       } else if (ext === 'obj') {
         this.emitProgress('Loading OBJ file...', 0);
         await this.importOBJ(result.data, result.filePath);
       } else {
-        console.log(`Importing ${result.format} file: ${result.filePath}`);
+        await this.importViaThreeJS(result.data, ext || '', result.filePath);
       }
     } finally {
       this.emitProgress('', 0, true);
     }
+  }
+
+  /** Import non-OBJ formats by loading with Three.js, converting to OBJ, then importing. */
+  private async importViaThreeJS(data: ArrayBuffer, ext: string, filePath?: string): Promise<void> {
+    this.emitProgress(`Loading ${ext.toUpperCase()} file...`, -1);
+
+    let object: THREE.Object3D;
+
+    if (ext === 'stl') {
+      const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
+      const loader = new STLLoader();
+      const geometry = loader.parse(data);
+      object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
+    } else if (ext === 'gltf' || ext === 'glb') {
+      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+      const loader = new GLTFLoader();
+      const gltf = await new Promise<any>((resolve, reject) => {
+        loader.parse(data, '', resolve, reject);
+      });
+      object = gltf.scene;
+    } else if (ext === 'fbx') {
+      const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
+      const loader = new FBXLoader();
+      object = loader.parse(data, '');
+    } else if (ext === 'dae') {
+      const { ColladaLoader } = await import('three/examples/jsm/loaders/ColladaLoader.js');
+      const loader = new ColladaLoader();
+      const text = new TextDecoder().decode(data);
+      const collada = loader.parse(text, '');
+      object = collada.scene;
+    } else if (ext === 'ply') {
+      const { PLYLoader } = await import('three/examples/jsm/loaders/PLYLoader.js');
+      const loader = new PLYLoader();
+      const geometry = loader.parse(data);
+      object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
+    } else if (ext === '3mf') {
+      const { ThreeMFLoader } = await import('three/examples/jsm/loaders/3MFLoader.js');
+      const loader = new ThreeMFLoader();
+      object = loader.parse(data);
+    } else {
+      console.warn(`[import] Unsupported format: ${ext}`);
+      return;
+    }
+
+    this.emitProgress('Converting to geometry...', 0.5);
+    await this.yieldUI();
+
+    // Convert loaded Three.js object to OBJ text via OBJExporter
+    const { OBJExporter } = await import('three/examples/jsm/exporters/OBJExporter.js');
+    const exporter = new OBJExporter();
+    const objText = exporter.parse(object);
+    const objData = new TextEncoder().encode(objText).buffer;
+
+    await this.importOBJ(objData as ArrayBuffer, filePath);
   }
 
   async exportFile(format: string): Promise<void> {
