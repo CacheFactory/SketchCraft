@@ -11,6 +11,7 @@ import { ContextMenu } from './ContextMenu';
 import { ToolSettingsPanel } from './ToolSettingsPanel';
 import { ViewportCanvas } from '../viewport.main/ViewportCanvas';
 import { AIChatPanel } from '../ai.chat/AIChatPanel';
+import { ExportModal } from './ExportModal';
 import { PreferencesWindow } from '../window.preferences/PreferencesWindow';
 import { WelcomeModal } from './WelcomeModal';
 import { DEFAULT_PREFERENCES } from '../../src/core/ipc-types';
@@ -46,6 +47,7 @@ for (const [toolId, binding] of Object.entries(DEFAULT_PREFERENCES.shortcuts)) {
 function AppLayout() {
   const { theme, app, activateTool, undo, redo, updateState, syncToolState, syncPreviews } = useApp();
   const [prefsVisible, setPrefsVisible] = useState(false);
+  const [exportVisible, setExportVisible] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(true);
   const isWeb = useIsWeb();
 
@@ -68,6 +70,7 @@ function AppLayout() {
       if (isMeta && e.key === 's' && !e.shiftKey) { e.preventDefault(); (app as any)?.saveDocument(); return; }
       if (isMeta && e.key === 's' && e.shiftKey) { e.preventDefault(); (app as any)?.saveDocumentAs(); return; }
       if (isMeta && e.key === 'o') { e.preventDefault(); (app as any)?.openDocument(); return; }
+      if (isMeta && e.key === 'e') { e.preventDefault(); setExportVisible(true); return; }
       if (isMeta && e.key === 'n') { e.preventDefault(); (app as any)?.newDocument(); return; }
 
       // Make Component (Cmd/Ctrl+G)
@@ -168,6 +171,13 @@ function AppLayout() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [app, activateTool, undo, redo, syncToolState, syncPreviews]);
 
+  // Listen for show-export-modal from MainToolbar
+  useEffect(() => {
+    const handler = () => setExportVisible(true);
+    window.addEventListener('show-export-modal', handler);
+    return () => window.removeEventListener('show-export-modal', handler);
+  }, []);
+
   // Listen for menu actions from main process
   useEffect(() => {
     if (typeof window.api === 'undefined') return;
@@ -193,6 +203,9 @@ function AppLayout() {
       }
 
       switch (action) {
+        case 'export':
+          setExportVisible(true);
+          return;
         case 'preferences':
           setPrefsVisible(true);
           break;
@@ -244,6 +257,11 @@ function AppLayout() {
       <ContextMenu />
       <LoadingOverlay />
       <AIChatPanel />
+      <ExportModal
+        visible={exportVisible}
+        onClose={() => setExportVisible(false)}
+        onExport={(fmt) => (app as any)?.exportFile(fmt)}
+      />
       <WelcomeModal
         visible={welcomeVisible}
         onNewProject={() => setWelcomeVisible(false)}

@@ -184,7 +184,7 @@ export class Application implements IApplication {
           this.sceneBridge.sync();
           break;
         }
-        case 'export': this.exportFile('obj'); break;
+        // 'export' is handled by ExportModal in App.tsx
         case 'zoom-extents': this.viewport.camera.fitToBox(this.document.geometry.getBoundingBox()); break;
         case 'select-all':
           this.document.selection.selectAll();
@@ -833,6 +833,11 @@ export class Application implements IApplication {
   }
 
   async exportFile(format: string): Promise<void> {
+    if (format === 'stl' || format === 'gltf' || format === 'glb' || format === 'ply') {
+      await this.exportViaThreeJS(format);
+      return;
+    }
+
     if (typeof window.api === 'undefined') return;
 
     if (format === 'obj') {
@@ -880,6 +885,64 @@ export class Application implements IApplication {
         format,
         defaultName: this.document.metadata.name,
       });
+    }
+  }
+
+  /** Export using Three.js built-in exporters (STL, glTF, PLY). */
+  private async exportViaThreeJS(format: string): Promise<void> {
+    const scene = this.sceneBridge.getScene();
+
+    let data: ArrayBuffer;
+    let defaultExt: string;
+
+    if (format === 'stl') {
+      const { STLExporter } = await import('three/examples/jsm/exporters/STLExporter.js');
+      const exporter = new STLExporter();
+      const result = exporter.parse(scene, { binary: true });
+      data = (result as DataView).buffer.slice(0) as ArrayBuffer;
+      defaultExt = 'stl';
+    } else if (format === 'gltf' || format === 'glb') {
+      const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
+      const exporter = new GLTFExporter();
+      const binary = format === 'glb';
+      const result = await new Promise<ArrayBuffer | object>((resolve, reject) => {
+        exporter.parse(scene, (res) => resolve(res as any), reject, { binary });
+      });
+      if (binary) {
+        data = result as ArrayBuffer;
+      } else {
+        const json = JSON.stringify(result, null, 2);
+        data = new TextEncoder().encode(json).buffer;
+      }
+      defaultExt = format;
+    } else if (format === 'ply') {
+      const { PLYExporter } = await import('three/examples/jsm/exporters/PLYExporter.js');
+      const exporter = new PLYExporter();
+      const result = await new Promise<string>((resolve) => {
+        exporter.parse(scene, (res: string) => resolve(res), {});
+      });
+      data = new TextEncoder().encode(result).buffer;
+      defaultExt = 'ply';
+    } else {
+      return;
+    }
+
+    // Save via file dialog (Electron) or download (web)
+    if (typeof window.api !== 'undefined') {
+      await window.api.invoke('file:export', {
+        data,
+        format: defaultExt,
+        defaultName: (this.document.metadata.name || 'Untitled') + '.' + defaultExt,
+      });
+    } else {
+      // Web fallback: trigger download
+      const blob = new Blob([data]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (this.document.metadata.name || 'Untitled') + '.' + defaultExt;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   }
 

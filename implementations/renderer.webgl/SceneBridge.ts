@@ -624,6 +624,9 @@ export class SceneBridge {
     }
   }
 
+  /** Get the Three.js scene (for exporters). */
+  getScene(): THREE.Scene { return this.scene; }
+
   /** Full sync: rebuild Three.js scene from geometry engine state.
    *  @param force - If true, skip dirty tracking and rebuild everything (used after undo/redo).
    */

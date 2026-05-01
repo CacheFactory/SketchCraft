@@ -90,7 +90,10 @@ export function MainToolbar() {
     { label: 'Save As\u2026', action: () => (app as any)?.saveDocumentAs?.(), shortcut: '\u21e7\u2318S' },
     { separator: true },
     { label: 'Import\u2026', action: () => (app as any)?.importFile?.(), shortcut: '\u2318I' },
-    { label: 'Export\u2026', action: () => (app as any)?.exportFile?.('obj'), shortcut: '\u2318E' },
+    { label: 'Export\u2026', action: () => {
+      // Emit menu action so App.tsx opens the export modal
+      window.dispatchEvent(new CustomEvent('show-export-modal'));
+    }, shortcut: '\u2318E' },
   ];
 
   const editItems: MenuItem[] = [
