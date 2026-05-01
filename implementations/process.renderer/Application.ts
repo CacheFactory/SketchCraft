@@ -723,31 +723,52 @@ export class Application implements IApplication {
 
         let compCount = 0;
         const mesh = geo.getMesh();
-        for (const [path, faceIdSet] of allPaths) {
-          const ids = Array.from(faceIdSet);
-          if (ids.length > 0) {
-            // Display name: last path segment with counter suffix stripped
-            const segments = path.split('/');
-            const displayName = segments[segments.length - 1].replace(/_\d+$/, '');
 
-            // Also include edges whose vertices are both in this component
-            const vertexSet = new Set<string>();
-            for (const fid of ids) {
-              const face = mesh.faces.get(fid);
-              if (face) for (const vid of face.vertexIds) vertexSet.add(vid);
-            }
-            const entityIds = [...ids];
-            mesh.edges.forEach((edge, edgeId) => {
-              if (vertexSet.has(edge.startVertexId) && vertexSet.has(edge.endVertexId)) {
-                entityIds.push(edgeId);
-              }
-            });
-            sm.createComponent(displayName, entityIds);
-            compCount++;
+        // Sort paths by depth so parents are created before children
+        const sortedPaths = Array.from(allPaths.entries())
+          .sort((a, b) => a[0].split('/').length - b[0].split('/').length);
+
+        // Map from path to component ID for parent lookups
+        const pathToCompId = new Map<string, string>();
+
+        for (const [path, faceIdSet] of sortedPaths) {
+          const ids = Array.from(faceIdSet);
+          if (ids.length === 0) continue;
+
+          // Display name: last path segment with counter suffix stripped
+          const segments = path.split('/');
+          const displayName = segments[segments.length - 1].replace(/_\d+$/, '');
+
+          // Also include edges whose vertices are both in this component
+          const vertexSet = new Set<string>();
+          for (const fid of ids) {
+            const face = mesh.faces.get(fid);
+            if (face) for (const vid of face.vertexIds) vertexSet.add(vid);
           }
+          const entityIds = [...ids];
+          mesh.edges.forEach((edge, edgeId) => {
+            if (vertexSet.has(edge.startVertexId) && vertexSet.has(edge.endVertexId)) {
+              entityIds.push(edgeId);
+            }
+          });
+
+          // Find parent path and set editingComponentId so createComponent
+          // sets the correct parentComponentId
+          const parentPath = segments.slice(0, -1).join('/');
+          const parentCompId = parentPath ? pathToCompId.get(parentPath) ?? null : null;
+          sm.editingComponentId = parentCompId;
+
+          const compId = sm.createComponent(displayName, entityIds);
+          pathToCompId.set(path, compId);
+          compCount++;
         }
+
+        // Reset editing state after import
+        sm.editingComponentId = null;
+        sm.editingComponentStack = [];
+
         if (compCount > 0) {
-          console.log(`[import] Created ${compCount} components from OBJ groups`);
+          console.log(`[import] Created ${compCount} components from OBJ groups (hierarchy preserved)`);
         }
       }
     }
