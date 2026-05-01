@@ -66,6 +66,9 @@ export class SceneManager implements ISceneManager {
   /** Which component is currently being edited (null = main scene). */
   editingComponentId: string | null = null;
 
+  /** Stack of component IDs for nested editing (outermost first). */
+  editingComponentStack: string[] = [];
+
   private entities: Map<string, Entity> = new Map();
   private emitter = new SimpleEventEmitter<SceneEvents>();
 
@@ -421,49 +424,64 @@ export class SceneManager implements ISceneManager {
   /** Explode a component back to loose geometry. */
   explodeComponent(componentId: string): void {
     this.components.delete(componentId);
-    if (this.editingComponentId === componentId) this.editingComponentId = null;
+    if (this.editingComponentId === componentId) {
+      this.exitComponent();
+    }
+    this.editingComponentStack = this.editingComponentStack.filter(id => id !== componentId);
     this.emitter.emit('changed');
   }
 
   /** Get the component that contains this entity ID, or null.
-   *  Returns the outermost non-editing component (like SketchUp: first click
-   *  selects the top-level component, double-click enters it to reach children).
-   *  When editing a component, only returns child components within the editing scope. */
+   *  Respects the component hierarchy like SketchUp:
+   *  - At the top level, returns the outermost (largest) component
+   *  - When editing a component, returns the direct child component
+   *    (smallest component that still contains entities not in deeper sub-components)
+   *  This means first click selects the top-level component, double-click enters it,
+   *  then you can select its direct children, and so on down the hierarchy. */
   getEntityComponent(entityId: string): string | null {
-    let result: string | null = null;
     const editingComp = this.editingComponentId
       ? this.components.get(this.editingComponentId) : null;
 
+    // Collect all components containing this entity
+    const containing: Array<{ id: string; size: number }> = [];
     for (const [compId, comp] of this.components) {
       if (!comp.entityIds.has(entityId)) continue;
       if (compId === this.editingComponentId) continue;
-
-      // When editing, only consider components fully contained within the editing component
-      if (editingComp) {
-        let isChild = comp.entityIds.size < editingComp.entityIds.size;
-        if (!isChild) continue;
-        // Verify it's actually a subset (spot check — full check too expensive)
-        let sample = true;
-        let checked = 0;
-        for (const eid of comp.entityIds) {
-          if (!editingComp.entityIds.has(eid)) { sample = false; break; }
-          if (++checked >= 10) break;
-        }
-        if (!sample) continue;
-      }
-
-      // Prefer the smallest (innermost) component — select the immediate
-      // component a face belongs to, not the entire model hierarchy
-      if (!result) {
-        result = compId;
-      } else {
-        const existing = this.components.get(result)!;
-        if (comp.entityIds.size < existing.entityIds.size) {
-          result = compId;
-        }
-      }
+      containing.push({ id: compId, size: comp.entityIds.size });
     }
-    return result;
+    if (containing.length === 0) return null;
+
+    if (!editingComp) {
+      // Top level: return the outermost (largest) component
+      let best = containing[0];
+      for (let i = 1; i < containing.length; i++) {
+        if (containing[i].size > best.size) best = containing[i];
+      }
+      return best.id;
+    }
+
+    // Editing a component: find the direct child component.
+    // Filter to only components that are subsets of the editing component.
+    const children: Array<{ id: string; size: number }> = [];
+    for (const c of containing) {
+      if (c.size >= editingComp.entityIds.size) continue;
+      const comp = this.components.get(c.id)!;
+      // Verify it's actually a subset
+      let isSubset = true;
+      for (const eid of comp.entityIds) {
+        if (!editingComp.entityIds.has(eid)) { isSubset = false; break; }
+      }
+      if (isSubset) children.push(c);
+    }
+    if (children.length === 0) return null;
+
+    // Return the largest child — this is the "direct" child in the hierarchy.
+    // (A direct child component is larger than its own sub-components.)
+    let best = children[0];
+    for (let i = 1; i < children.length; i++) {
+      if (children[i].size > best.size) best = children[i];
+    }
+    return best.id;
   }
 
   /** Check if an entity is inside a component and NOT currently being edited. */
@@ -473,16 +491,23 @@ export class SceneManager implements ISceneManager {
     return true; // getEntityComponent already excludes the editing component
   }
 
-  /** Enter component editing mode. */
+  /** Enter component editing mode (supports nesting). */
   enterComponent(componentId: string): void {
     if (!this.components.has(componentId)) return;
+    if (this.editingComponentId) {
+      this.editingComponentStack.push(this.editingComponentId);
+    }
     this.editingComponentId = componentId;
     this.emitter.emit('changed');
   }
 
-  /** Exit component editing mode. */
+  /** Exit component editing mode (pops one level, or exits to main scene). */
   exitComponent(): void {
-    this.editingComponentId = null;
+    if (this.editingComponentStack.length > 0) {
+      this.editingComponentId = this.editingComponentStack.pop()!;
+    } else {
+      this.editingComponentId = null;
+    }
     this.emitter.emit('changed');
   }
 
