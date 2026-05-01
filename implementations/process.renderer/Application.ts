@@ -11,6 +11,7 @@ import { Viewport } from '../viewport.main/Viewport';
 import { ToolManager } from '../tool.select/ToolManager';
 import { InferenceEngine } from '../engine.inference/InferenceEngine';
 import { SceneBridge } from '../renderer.webgl/SceneBridge';
+import * as THREE from 'three';
 
 // Tool imports (static for reliability)
 import { SelectTool } from '../tool.select/selectTool';
@@ -833,7 +834,7 @@ export class Application implements IApplication {
   }
 
   async exportFile(format: string): Promise<void> {
-    if (format === 'stl' || format === 'gltf' || format === 'glb' || format === 'ply') {
+    if (format === 'stl' || format === 'gltf' || format === 'glb' || format === 'ply' || format === 'dxf') {
       await this.exportViaThreeJS(format);
       return;
     }
@@ -923,6 +924,9 @@ export class Application implements IApplication {
       });
       data = new TextEncoder().encode(result).buffer;
       defaultExt = 'ply';
+    } else if (format === 'dxf') {
+      data = new TextEncoder().encode(this.exportSceneToDXF(scene)).buffer;
+      defaultExt = 'dxf';
     } else {
       return;
     }
@@ -944,6 +948,72 @@ export class Application implements IApplication {
       a.click();
       URL.revokeObjectURL(url);
     }
+  }
+
+  /** Export Three.js scene to DXF format using 3DFACE entities. */
+  private exportSceneToDXF(scene: THREE.Scene): string {
+    const lines: string[] = [];
+    const w = (code: number, value: string | number) => {
+      lines.push(`  ${code}`);
+      lines.push(`${value}`);
+    };
+
+    // Header
+    w(0, 'SECTION'); w(2, 'HEADER');
+    w(9, '$ACADVER'); w(1, 'AC1015'); // AutoCAD 2000
+    w(0, 'ENDSEC');
+
+    // Entities section
+    w(0, 'SECTION'); w(2, 'ENTITIES');
+
+    let handle = 100;
+    scene.traverse((obj) => {
+      if (!(obj as THREE.Mesh).isMesh) return;
+      const mesh = obj as THREE.Mesh;
+      const geom = mesh.geometry;
+      if (!geom) return;
+
+      // Get world-space positions
+      const posAttr = geom.getAttribute('position');
+      if (!posAttr) return;
+      const index = geom.getIndex();
+
+      const worldMatrix = mesh.matrixWorld;
+      const v = new THREE.Vector3();
+
+      const getVertex = (i: number): [number, number, number] => {
+        v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+        v.applyMatrix4(worldMatrix);
+        return [v.x, v.y, v.z];
+      };
+
+      const triCount = index ? index.count / 3 : posAttr.count / 3;
+      for (let t = 0; t < triCount; t++) {
+        const i0 = index ? index.getX(t * 3) : t * 3;
+        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+
+        const p0 = getVertex(i0);
+        const p1 = getVertex(i1);
+        const p2 = getVertex(i2);
+
+        w(0, '3DFACE');
+        w(5, (handle++).toString(16).toUpperCase());
+        w(8, '0'); // layer
+        // Vertex 0
+        w(10, p0[0]); w(20, p0[1]); w(30, p0[2]);
+        // Vertex 1
+        w(11, p1[0]); w(21, p1[1]); w(31, p1[2]);
+        // Vertex 2
+        w(12, p2[0]); w(22, p2[1]); w(32, p2[2]);
+        // Vertex 3 (repeat vertex 2 for triangular face)
+        w(13, p2[0]); w(23, p2[1]); w(33, p2[2]);
+      }
+    });
+
+    w(0, 'ENDSEC');
+    w(0, 'EOF');
+    return lines.join('\n');
   }
 
   activateTool(toolId: string): void {

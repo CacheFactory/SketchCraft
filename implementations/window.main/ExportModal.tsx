@@ -14,6 +14,7 @@ export const EXPORT_FORMATS: ExportFormat[] = [
   { id: 'glb', name: 'GLB', ext: '.glb', description: 'glTF Binary (single file)' },
   { id: 'stl', name: 'STL', ext: '.stl', description: 'Stereolithography (3D printing)' },
   { id: 'ply', name: 'PLY', ext: '.ply', description: 'Polygon File Format (vertex colors)' },
+  { id: 'dxf', name: 'DXF', ext: '.dxf', description: 'AutoCAD Drawing Exchange Format (3D faces)' },
 ];
 
 interface ExportModalProps {
