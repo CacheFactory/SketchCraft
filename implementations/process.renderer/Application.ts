@@ -261,7 +261,9 @@ export class Application implements IApplication {
 
     // In batched/view-only mode, don't extract faces — just highlight in place.
     // Extraction creates individual Three.js objects per face which kills performance.
-    const MAX_HIGHLIGHT_FACES = 500; // Cap to prevent freezing on large components
+    // Use batched highlighting (color tint) for larger components instead of extraction.
+    const MAX_EXTRACT_FACES = 500; // Cap for extraction (creates individual Three.js objects)
+    const MAX_HIGHLIGHT_FACES = 50000; // Cap for batched tint highlighting
 
     if (this.sceneBridge.batchedMode) {
       // Only extract small selections — large component extraction kills performance
@@ -273,7 +275,7 @@ export class Application implements IApplication {
         }
         if (sm?.components?.has(id)) {
           const comp = sm.components.get(id);
-          if (comp && comp.entityIds.size <= MAX_HIGHLIGHT_FACES) {
+          if (comp && comp.entityIds.size <= MAX_EXTRACT_FACES) {
             for (const eid of comp.entityIds) {
               if (this.sceneBridge.isBatchedFace(eid)) {
                 this.sceneBridge.extractFromBatch(eid);
@@ -317,7 +319,7 @@ export class Application implements IApplication {
     for (const pid of preSelIds) {
       if (sm?.components?.has(pid)) {
         const comp = sm.components.get(pid);
-        if (comp && comp.entityIds.size <= MAX_HIGHLIGHT_FACES) {
+        if (comp && comp.entityIds.size <= MAX_EXTRACT_FACES) {
           for (const eid of comp.entityIds) preSelHighlightIds.push(eid);
         }
       } else {
