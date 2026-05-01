@@ -15,6 +15,8 @@ export const EXPORT_FORMATS: ExportFormat[] = [
   { id: 'stl', name: 'STL', ext: '.stl', description: 'Stereolithography (3D printing)' },
   { id: 'ply', name: 'PLY', ext: '.ply', description: 'Polygon File Format (vertex colors)' },
   { id: 'dxf', name: 'DXF', ext: '.dxf', description: 'AutoCAD Drawing Exchange Format (3D faces)' },
+  { id: 'usdz', name: 'USDZ', ext: '.usdz', description: 'Apple AR Quick Look (iPhone, iPad, Vision Pro)' },
+  { id: 'dae', name: 'COLLADA', ext: '.dae', description: 'Digital Asset Exchange (Blender, game engines)' },
 ];
 
 interface ExportModalProps {

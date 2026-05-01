@@ -834,7 +834,7 @@ export class Application implements IApplication {
   }
 
   async exportFile(format: string): Promise<void> {
-    if (format === 'stl' || format === 'gltf' || format === 'glb' || format === 'ply' || format === 'dxf') {
+    if (format === 'stl' || format === 'gltf' || format === 'glb' || format === 'ply' || format === 'dxf' || format === 'usdz' || format === 'dae') {
       await this.exportViaThreeJS(format);
       return;
     }
@@ -927,6 +927,16 @@ export class Application implements IApplication {
     } else if (format === 'dxf') {
       data = new TextEncoder().encode(this.exportSceneToDXF(scene)).buffer;
       defaultExt = 'dxf';
+    } else if (format === 'usdz') {
+      const { USDZExporter } = await import('three/examples/jsm/exporters/USDZExporter.js');
+      const exporter = new USDZExporter();
+      const result = await exporter.parse(scene);
+      const u8 = result as unknown as Uint8Array;
+      data = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+      defaultExt = 'usdz';
+    } else if (format === 'dae') {
+      data = new TextEncoder().encode(this.exportSceneToCollada(scene)).buffer;
+      defaultExt = 'dae';
     } else {
       return;
     }
@@ -1013,6 +1023,105 @@ export class Application implements IApplication {
 
     w(0, 'ENDSEC');
     w(0, 'EOF');
+    return lines.join('\n');
+  }
+
+  /** Export Three.js scene to COLLADA (.dae) XML format. */
+  private exportSceneToCollada(scene: THREE.Scene): string {
+    const meshes: { positions: number[]; normals: number[]; indices: number[]; name: string }[] = [];
+
+    scene.traverse((obj) => {
+      if (!(obj as THREE.Mesh).isMesh) return;
+      const mesh = obj as THREE.Mesh;
+      const geom = mesh.geometry;
+      if (!geom) return;
+
+      const posAttr = geom.getAttribute('position');
+      const normAttr = geom.getAttribute('normal');
+      if (!posAttr) return;
+
+      const index = geom.getIndex();
+      const worldMatrix = mesh.matrixWorld;
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(worldMatrix);
+      const v = new THREE.Vector3();
+      const n = new THREE.Vector3();
+
+      const positions: number[] = [];
+      const normals: number[] = [];
+      const indices: number[] = [];
+
+      const vertCount = posAttr.count;
+      for (let i = 0; i < vertCount; i++) {
+        v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(worldMatrix);
+        positions.push(v.x, v.y, v.z);
+        if (normAttr) {
+          n.set(normAttr.getX(i), normAttr.getY(i), normAttr.getZ(i)).applyMatrix3(normalMatrix).normalize();
+          normals.push(n.x, n.y, n.z);
+        } else {
+          normals.push(0, 1, 0);
+        }
+      }
+
+      if (index) {
+        for (let i = 0; i < index.count; i++) indices.push(index.getX(i));
+      } else {
+        for (let i = 0; i < vertCount; i++) indices.push(i);
+      }
+
+      meshes.push({ positions, normals, indices, name: mesh.name || `mesh_${meshes.length}` });
+    });
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const lines: string[] = [];
+    lines.push('<?xml version="1.0" encoding="utf-8"?>');
+    lines.push('<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">');
+    lines.push('  <asset><created>' + new Date().toISOString() + '</created><up_axis>Y_UP</up_axis></asset>');
+
+    // Geometry library
+    lines.push('  <library_geometries>');
+    for (let mi = 0; mi < meshes.length; mi++) {
+      const m = meshes[mi];
+      const id = `geom_${mi}`;
+      lines.push(`    <geometry id="${id}" name="${esc(m.name)}">`);
+      lines.push('      <mesh>');
+      // Positions
+      lines.push(`        <source id="${id}_pos">`);
+      lines.push(`          <float_array id="${id}_pos_arr" count="${m.positions.length}">${m.positions.join(' ')}</float_array>`);
+      lines.push(`          <technique_common><accessor source="#${id}_pos_arr" count="${m.positions.length / 3}" stride="3">`);
+      lines.push('            <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>');
+      lines.push('          </accessor></technique_common>');
+      lines.push('        </source>');
+      // Normals
+      lines.push(`        <source id="${id}_norm">`);
+      lines.push(`          <float_array id="${id}_norm_arr" count="${m.normals.length}">${m.normals.join(' ')}</float_array>`);
+      lines.push(`          <technique_common><accessor source="#${id}_norm_arr" count="${m.normals.length / 3}" stride="3">`);
+      lines.push('            <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>');
+      lines.push('          </accessor></technique_common>');
+      lines.push('        </source>');
+      // Vertices
+      lines.push(`        <vertices id="${id}_vtx"><input semantic="POSITION" source="#${id}_pos"/></vertices>`);
+      // Triangles
+      lines.push(`        <triangles count="${m.indices.length / 3}">`);
+      lines.push(`          <input semantic="VERTEX" source="#${id}_vtx" offset="0"/>`);
+      lines.push(`          <input semantic="NORMAL" source="#${id}_norm" offset="0"/>`);
+      lines.push(`          <p>${m.indices.join(' ')}</p>`);
+      lines.push('        </triangles>');
+      lines.push('      </mesh>');
+      lines.push('    </geometry>');
+    }
+    lines.push('  </library_geometries>');
+
+    // Visual scenes
+    lines.push('  <library_visual_scenes><visual_scene id="Scene" name="Scene">');
+    for (let mi = 0; mi < meshes.length; mi++) {
+      lines.push(`    <node id="node_${mi}" name="${esc(meshes[mi].name)}" type="NODE">`);
+      lines.push(`      <instance_geometry url="#geom_${mi}"/>`);
+      lines.push('    </node>');
+    }
+    lines.push('  </visual_scene></library_visual_scenes>');
+    lines.push('  <scene><instance_visual_scene url="#Scene"/></scene>');
+    lines.push('</COLLADA>');
+
     return lines.join('\n');
   }
 
