@@ -447,7 +447,7 @@ export interface IRenderer {
   setSelectionHighlight(entityIds: string[]): void;
   setPreSelectionHighlight(entityId: string | null): void;
   setPreSelectionHighlightMulti(entityIds: string[]): void;
-  addGuideLine(id: string, start: Vec3, end: Vec3, color: Color, dashed?: boolean): void;
+  addGuideLine(id: string, start: Vec3, end: Vec3, color: Color, dashed?: boolean, opts?: { depthTest?: boolean; renderOrder?: number; opacity?: number }): void;
   removeGuideLine(id: string): void;
   clearGuideLines(): void;
   setGridVisible(visible: boolean): void;

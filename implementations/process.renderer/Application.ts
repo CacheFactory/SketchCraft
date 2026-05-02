@@ -385,9 +385,10 @@ export class Application implements IApplication {
     ];
 
     const color = { r: 0.24, g: 0.47, b: 1.0 }; // selection blue
+    const lineOpts = { depthTest: false, renderOrder: 999 };
     for (const [a, b] of edges) {
       const id = `_comp_bbox_${componentId}_${a}_${b}`;
-      this.viewport.renderer.addGuideLine(id, c[a], c[b], color, false);
+      this.viewport.renderer.addGuideLine(id, c[a], c[b], color, false, lineOpts);
       this._componentBBoxLines.push(id);
     }
   }

@@ -966,7 +966,7 @@ export class WebGLRenderer implements IRenderer {
     this._highlightedObjects.clear();
   }
 
-  addGuideLine(id: string, start: Vec3, end: Vec3, color: Color, dashed?: boolean): void {
+  addGuideLine(id: string, start: Vec3, end: Vec3, color: Color, dashed?: boolean, opts?: { depthTest?: boolean; renderOrder?: number; opacity?: number }): void {
     this.removeGuideLine(id);
 
     const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -976,6 +976,8 @@ export class WebGLRenderer implements IRenderer {
 
     let material: THREE.Material;
     const threeColor = new THREE.Color(color.r, color.g, color.b);
+    const depthTest = opts?.depthTest ?? true;
+    const transparent = (opts?.opacity !== undefined && opts.opacity < 1);
 
     if (dashed) {
       material = new THREE.LineDashedMaterial({
@@ -983,17 +985,24 @@ export class WebGLRenderer implements IRenderer {
         dashSize: 0.2,
         gapSize: 0.1,
         linewidth: 1,
+        depthTest,
+        transparent,
+        opacity: opts?.opacity ?? 1,
       });
     } else {
       material = new THREE.LineBasicMaterial({
         color: threeColor,
         linewidth: 1,
+        depthTest,
+        transparent,
+        opacity: opts?.opacity ?? 1,
       });
     }
 
     const line = new THREE.Line(geometry, material);
     if (dashed) line.computeLineDistances();
     line.name = `guide-${id}`;
+    if (opts?.renderOrder !== undefined) line.renderOrder = opts.renderOrder;
 
     this._guideLines.set(id, line);
     this._guideGroup.add(line);

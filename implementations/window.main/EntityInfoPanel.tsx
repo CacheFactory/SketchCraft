@@ -186,16 +186,12 @@ export function EntityInfoPanel() {
                   <span className="prop-value">{value}</span>
                 </div>
               ))}
-              {!isEditingComponent && (
-                <button className="component-btn make" onClick={handleMakeComponent}>Make Component</button>
-              )}
+              <button className="component-btn make" onClick={handleMakeComponent}>Make Component</button>
             </div>
           ) : (
             <div className="entity-list">
               <div className="entity-list-header">{selectedCount} entities selected</div>
-              {!isEditingComponent && (
-                <button className="component-btn make" onClick={handleMakeComponent}>Make Component</button>
-              )}
+              <button className="component-btn make" onClick={handleMakeComponent}>Make Component</button>
               {summaries.map((s, i) => (
                 <div key={s.id} className="entity-list-item">
                   <span className="entity-list-icon">
