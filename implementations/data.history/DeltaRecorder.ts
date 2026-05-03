@@ -11,11 +11,22 @@ export type DeltaOp =
   | { op: 'delete'; map: string; key: string; value: unknown }
   | { op: 'modify'; map: string; key: string; before: unknown; after: unknown };
 
+export interface GuideLineDelta {
+  id: string;
+  start: { x: number; y: number; z: number };
+  end: { x: number; y: number; z: number };
+  color: { r: number; g: number; b: number; a?: number };
+  dashed: boolean;
+}
+
 export interface DeltaTransaction {
   id: string;
   name: string;
   timestamp: number;
   deltas: DeltaOp[];
+  dimensionsBefore?: Map<string, unknown>;
+  dimensionsAfter?: Map<string, unknown>;
+  guideLines?: GuideLineDelta[];
 }
 
 // ─── Entity clone helpers ───────────────────────────────────────

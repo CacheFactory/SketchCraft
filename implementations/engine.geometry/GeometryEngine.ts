@@ -463,10 +463,96 @@ export class GeometryEngine implements IGeometryEngine {
       if (this.loopContainsInteriorVertex(loop)) continue;
 
       try {
-        this.createFace(loop);
+        const newFace = this.createFace(loop);
+        // Check if this new face is entirely inside an existing coplanar face.
+        // If so, cut a hole in the outer face.
+        this.cutHoleIfEnclosed(newFace.id, loop);
       } catch {
         // Silently ignore
       }
+    }
+  }
+
+  /**
+   * If a newly created face (with given vertex loop) is entirely enclosed within
+   * another coplanar face, add a hole to the enclosing face (mutate in place).
+   */
+  private cutHoleIfEnclosed(newFaceId: string, holeLoop: string[]): void {
+    const newFace = this.mesh.faces.get(newFaceId);
+    if (!newFace) return;
+
+    const holeNormal = newFace.normal;
+
+    // Get positions for the hole vertices
+    const holePositions = holeLoop.map(id => this.mesh.vertices.get(id)?.position).filter(Boolean) as Vec3[];
+    if (holePositions.length < 3) return;
+
+    // Compute plane of the hole
+    const planeDist = vec3.dot(holeNormal, holePositions[0]);
+
+    for (const [faceId, face] of this.mesh.faces) {
+      if (faceId === newFaceId) continue;
+      if (this.isProtectedEntity?.(faceId)) continue;
+
+      // Check coplanarity
+      const dot = Math.abs(
+        face.normal.x * holeNormal.x + face.normal.y * holeNormal.y + face.normal.z * holeNormal.z
+      );
+      if (dot < 0.99) continue;
+
+      // Check that the outer face's plane matches
+      const outerVert0 = this.mesh.vertices.get(face.vertexIds[0]);
+      if (!outerVert0) continue;
+      const outerPlaneDist = vec3.dot(holeNormal, outerVert0.position);
+      if (Math.abs(outerPlaneDist - planeDist) > 0.05) continue;
+
+      // The hole vertices must NOT be part of the outer face's boundary
+      const outerVertSet = new Set(face.vertexIds);
+      if (holeLoop.some(v => outerVertSet.has(v))) continue;
+
+      // Check that ALL hole vertices are inside the outer face's polygon
+      // Only check against the outer boundary (before any existing holes)
+      const outerBoundaryEnd = face.holeStartIndices?.[0] ?? face.vertexIds.length;
+      const outerBoundaryVerts = face.vertexIds.slice(0, outerBoundaryEnd);
+      const outerPositions = outerBoundaryVerts.map(id => this.mesh.vertices.get(id)?.position).filter(Boolean) as Vec3[];
+      if (outerPositions.length < 3) continue;
+
+      const v01 = vec3.sub(outerPositions[1], outerPositions[0]);
+      const axisU = vec3.normalize(v01);
+      const axisV = vec3.normalize(vec3.cross(holeNormal, axisU));
+
+      const outerPoly2D = outerPositions.map(p => ({
+        u: vec3.dot(vec3.sub(p, outerPositions[0]), axisU),
+        v: vec3.dot(vec3.sub(p, outerPositions[0]), axisV),
+      }));
+
+      let allInside = true;
+      for (const hp of holePositions) {
+        const pu = vec3.dot(vec3.sub(hp, outerPositions[0]), axisU);
+        const pv = vec3.dot(vec3.sub(hp, outerPositions[0]), axisV);
+        let inside = false;
+        for (let i = 0, j = outerPoly2D.length - 1; i < outerPoly2D.length; j = i++) {
+          const ui = outerPoly2D[i].u, vi = outerPoly2D[i].v;
+          const uj = outerPoly2D[j].u, vj = outerPoly2D[j].v;
+          if (((vi > pv) !== (vj > pv)) &&
+              (pu < (uj - ui) * (pv - vi) / (vj - vi) + ui)) {
+            inside = !inside;
+          }
+        }
+        if (!inside) { allInside = false; break; }
+      }
+
+      if (!allInside) continue;
+
+      // Found an enclosing face — mutate it in place to add the hole.
+      const holeStart = face.vertexIds.length;
+      face.vertexIds.push(...holeLoop);
+      if (!face.holeStartIndices) face.holeStartIndices = [];
+      face.holeStartIndices.push(holeStart);
+      // Bump generation so renderer picks up the change
+      face.generation = Date.now();
+
+      return; // Only one enclosing face expected
     }
   }
 
@@ -814,7 +900,8 @@ export class GeometryEngine implements IGeometryEngine {
   }
 
   deleteFace(id: string): void {
-    // Remove face and its half-edges, leave edges and vertices
+    // Remove face and its half-edges, leave edges and vertices.
+    // If this face was a hole in an enclosing face, the hole stays (like a window).
     this.mesh.removeFace(id);
   }
 

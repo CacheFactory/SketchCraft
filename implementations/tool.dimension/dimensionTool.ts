@@ -202,12 +202,7 @@ export class DimensionTool extends BaseTool {
   private createDimension(offsetPoint: Vec3): void {
     if (!this.startPoint || !this.endPoint) return;
 
-    // Create a transaction so Cmd+Z removes this dimension.
-    // The geometry snapshot is identical before/after, but having a
-    // transaction on the undo stack means syncScene → reconcile runs.
     this.beginTransaction('Dimension');
-    // Mark geometry dirty so the snapshot captures current state
-    this.document.markDirty();
 
     const offset = this.computeOffset(this.startPoint, this.endPoint, offsetPoint);
     if (!offset) return;

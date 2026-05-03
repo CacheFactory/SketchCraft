@@ -66,47 +66,77 @@ export class ExtrudeOperation {
       newVertexIds.push(newVertex.id);
     }
 
-    // Step 2: Create edges between new vertices (the new cap edges)
-    const orderedVertexIds = face.vertexIds;
-    const newCapVertexIds: string[] = orderedVertexIds.map(vid => vertexMap.get(vid)!);
-
-    for (let i = 0; i < newCapVertexIds.length; i++) {
-      const j = (i + 1) % newCapVertexIds.length;
-      const edge = engine.createEdge(newCapVertexIds[i], newCapVertexIds[j]);
-      newEdgeIds.push(edge.id);
+    // Split vertexIds into separate loops: outer boundary + hole loops
+    const allVertexIds = face.vertexIds;
+    const holeStarts = face.holeStartIndices && face.holeStartIndices.length > 0
+      ? [...face.holeStartIndices].sort((a, b) => a - b)
+      : [];
+    const loopBoundaries = [0, ...holeStarts, allVertexIds.length];
+    const loops: string[][] = [];
+    for (let li = 0; li < loopBoundaries.length - 1; li++) {
+      loops.push(allVertexIds.slice(loopBoundaries[li], loopBoundaries[li + 1]));
     }
 
-    // Step 3: Create vertical edges connecting original to new vertices
-    const verticalEdgeIds: string[] = [];
-    for (const vid of orderedVertexIds) {
-      const newVid = vertexMap.get(vid)!;
-      const edge = engine.createEdge(vid, newVid);
-      verticalEdgeIds.push(edge.id);
-      newEdgeIds.push(edge.id);
+    // Step 2 & 3: For each loop, create cap edges, vertical edges, and side faces
+    for (let li = 0; li < loops.length; li++) {
+      const loop = loops[li];
+      const isHole = li > 0;
+
+      // Create cap edges for this loop
+      const newCapLoop = loop.map(vid => vertexMap.get(vid)!);
+      for (let i = 0; i < newCapLoop.length; i++) {
+        const j = (i + 1) % newCapLoop.length;
+        const edge = engine.createEdge(newCapLoop[i], newCapLoop[j]);
+        newEdgeIds.push(edge.id);
+      }
+
+      // Create vertical edges
+      for (const vid of loop) {
+        const newVid = vertexMap.get(vid)!;
+        // Avoid creating duplicate vertical edges (shared between outer and hole)
+        const existing = engine.findEdgeBetween(vid, newVid);
+        if (!existing) {
+          const edge = engine.createEdge(vid, newVid);
+          newEdgeIds.push(edge.id);
+        }
+      }
+
+      // Create side faces for this loop
+      for (let i = 0; i < loop.length; i++) {
+        const j = (i + 1) % loop.length;
+        const origA = loop[i];
+        const origB = loop[j];
+        const newA = vertexMap.get(origA)!;
+        const newB = vertexMap.get(origB)!;
+
+        // Side face winding: for outer boundary, origA -> origB -> newB -> newA
+        // For holes, reverse winding so normals face outward (into the hole)
+        const sideFace = isHole
+          ? engine.createFace([origA, newA, newB, origB])
+          : engine.createFace([origA, origB, newB, newA]);
+        sideFaceIds.push(sideFace.id);
+      }
     }
 
-    // Step 4: Create side faces
-    // Each side face connects an original edge to the corresponding new edge
-    // via two vertical edges, forming a quad.
-    for (let i = 0; i < orderedVertexIds.length; i++) {
-      const j = (i + 1) % orderedVertexIds.length;
+    // Step 4: Create the new cap face from the new vertices (preserving holes)
+    // Create cap with just the outer boundary loop to avoid bridge edges
+    const outerLoop = loops[0];
+    const newCapOuter = outerLoop.map(vid => vertexMap.get(vid)!);
+    const newFace = engine.createFace(newCapOuter);
 
-      const origA = orderedVertexIds[i];
-      const origB = orderedVertexIds[j];
-      const newA = vertexMap.get(origA)!;
-      const newB = vertexMap.get(origB)!;
-
-      // Side face winding: origA -> origB -> newB -> newA
-      // This ensures the normal faces outward (away from the extrusion volume)
-      const sideFace = engine.createFace([origA, origB, newB, newA]);
-      sideFaceIds.push(sideFace.id);
+    // If there are holes, append hole vertices and set holeStartIndices
+    if (loops.length > 1) {
+      for (let li = 1; li < loops.length; li++) {
+        const holeStart = newFace.vertexIds.length;
+        const newHoleVerts = loops[li].map(vid => vertexMap.get(vid)!);
+        newFace.vertexIds.push(...newHoleVerts);
+        if (!newFace.holeStartIndices) newFace.holeStartIndices = [];
+        newFace.holeStartIndices.push(holeStart);
+      }
+      newFace.generation = Date.now();
     }
 
-    // Step 5: Create the new cap face from the new vertices
-    // Preserve the same winding order as the original face
-    const newFace = engine.createFace(newCapVertexIds);
-
-    // Step 6: Delete the original face (it is now interior to the extrusion)
+    // Step 5: Delete the original face (it is now interior to the extrusion)
     engine.deleteFace(faceId);
 
     return {

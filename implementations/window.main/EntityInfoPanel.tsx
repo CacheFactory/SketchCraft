@@ -121,6 +121,26 @@ export function EntityInfoPanel() {
     (app as any)?.syncScene?.();
   };
 
+  const handleBreadcrumbClick = (crumb: { id: string | null; name: string }, index: number) => {
+    if (!sm) return;
+    // Clicking the last (active) breadcrumb does nothing
+    if (index === componentBreadcrumb.length - 1) return;
+    // Exit editing levels until we reach the target
+    // If clicking "Scene" (id=null), exit all levels
+    // If clicking a component, exit until editingComponentId matches
+    while (sm.editingComponentId) {
+      if (crumb.id && sm.editingComponentId === crumb.id) break;
+      sm.exitComponent();
+    }
+    // Select the component that was clicked (if it's not Scene)
+    app?.document?.selection?.clear();
+    if (crumb.id) {
+      app?.document?.selection?.select(crumb.id);
+    }
+    (app as any)?.syncScene?.();
+    (app as any)?.syncSelection?.();
+  };
+
   const handleExplodeComponent = () => {
     if (!sm || !selectedComponentId) return;
     sm.explodeComponent(selectedComponentId);
@@ -144,7 +164,10 @@ export function EntityInfoPanel() {
               {componentBreadcrumb.map((crumb, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <span className="breadcrumb-sep">›</span>}
-                  <span className={`breadcrumb-item${i === componentBreadcrumb.length - 1 ? ' active' : ''}`}>
+                  <span
+                    className={`breadcrumb-item${i === componentBreadcrumb.length - 1 ? ' active' : ' clickable'}`}
+                    onClick={() => handleBreadcrumbClick(crumb, i)}
+                  >
                     {crumb.name}
                   </span>
                 </React.Fragment>
@@ -270,6 +293,13 @@ export function EntityInfoPanel() {
         }
         .breadcrumb-item.active {
           color: #9c27b0; font-weight: 600;
+        }
+        .breadcrumb-item.clickable {
+          cursor: pointer; text-decoration: underline; text-decoration-color: transparent;
+          transition: text-decoration-color 0.15s;
+        }
+        .breadcrumb-item.clickable:hover {
+          text-decoration-color: currentColor; color: var(--accent);
         }
         .component-exit-btn {
           margin-left: auto;

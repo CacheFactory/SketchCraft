@@ -7,6 +7,9 @@ import type { IGeometryEngine, IFace, IEdge, ISceneManager, IMaterialManager } f
 import type { WebGLRenderer } from './WebGLRenderer';
 import type { SceneManager } from '../data.scene/SceneManager';
 
+const _fadeTint = new THREE.Color(0.85, 0.85, 0.85);
+const _selTint = new THREE.Color(0.24, 0.47, 1.0);
+
 export class SceneBridge {
   private engine: IGeometryEngine;
   private sceneManager: SceneManager | null = null;
@@ -1045,44 +1048,47 @@ export class SceneBridge {
     }
   }
 
-  private _lastDimmingCompId: string | null = null;
+  private _lastDimmingCompId: string | null = '__init__';
+  private _lastDimmingMemberCount = 0;
 
   /** When editing a component, dim faces/edges outside the component. */
   private syncComponentDimming(): void {
     if (!this.sceneManager) return;
 
     const editingId = this.sceneManager.editingComponentId;
+    const comp = editingId ? this.sceneManager.components.get(editingId) : null;
+    const memberIds = comp ? comp.entityIds : null;
+    const memberCount = memberIds ? memberIds.size : 0;
 
-    // Skip if dimming state hasn't changed
-    if (editingId === this._lastDimmingCompId) return;
+    // Skip if dimming state hasn't changed (same component, same member count)
+    if (editingId === this._lastDimmingCompId && memberCount === this._lastDimmingMemberCount) return;
     this._lastDimmingCompId = editingId;
+    this._lastDimmingMemberCount = memberCount;
 
-    if (editingId) {
-      const comp = this.sceneManager.components.get(editingId);
-      const memberIds = comp ? comp.entityIds : new Set<string>();
-
-      // Dim non-member faces
+    if (editingId && memberIds) {
+      // Fade non-member faces by tinting color toward white
       for (const [faceId, group] of this.faceGroups) {
         const isMember = memberIds.has(faceId);
         group.traverse(child => {
           if (child instanceof THREE.Mesh) {
             const mat = child.material as THREE.MeshStandardMaterial;
-            mat.opacity = isMember ? 1 : 0.15;
-            mat.transparent = mat.opacity < 1;
+            if (!isMember) {
+              if (!(mat as any)._origColor) (mat as any)._origColor = mat.color.clone();
+              mat.color.copy((mat as any)._origColor).lerp(_fadeTint, 0.8);
+            } else if ((mat as any)._origColor) {
+              mat.color.copy((mat as any)._origColor);
+            }
           }
         });
       }
-
-      // Dim non-member edges
+      // Fade non-member edges
       for (const [edgeId, line] of this.edgeLines) {
         const isMember = memberIds.has(edgeId);
-        // Clone material per-edge only when dimming (edges share a single material otherwise)
         if (!isMember) {
           if (line.material === this.edgeMaterial) {
             line.material = this.edgeMaterial.clone();
           }
-          (line.material as THREE.LineBasicMaterial).opacity = 0.15;
-          (line.material as THREE.LineBasicMaterial).transparent = true;
+          (line.material as THREE.LineBasicMaterial).color.set(0xcccccc);
         } else {
           if (line.material !== this.edgeMaterial) {
             (line.material as THREE.Material).dispose();
@@ -1091,20 +1097,19 @@ export class SceneBridge {
         }
       }
     } else {
-      // Restore all faces
+      // Restore face colors
       for (const [, group] of this.faceGroups) {
         group.traverse(child => {
           if (child instanceof THREE.Mesh) {
             const mat = child.material as THREE.MeshStandardMaterial;
-            // Restore opacity (respect material definition)
-            const matDef = this.materialManager?.getFaceMaterial(child.userData.entityId);
-            mat.opacity = matDef?.opacity ?? 1;
-            mat.transparent = mat.opacity < 1;
+            if ((mat as any)._origColor) {
+              mat.color.copy((mat as any)._origColor);
+              delete (mat as any)._origColor;
+            }
           }
         });
       }
-
-      // Restore all edges to shared material
+      // Restore edge materials
       for (const [, line] of this.edgeLines) {
         if (line.material !== this.edgeMaterial) {
           (line.material as THREE.Material).dispose();
@@ -1112,6 +1117,42 @@ export class SceneBridge {
         }
       }
     }
+  }
+
+  /** Tint faces of a component with selection blue. Cheap: just adjusts material color. */
+  private _tintedFaceIds = new Set<string>();
+
+  tintComponentFaces(entityIds: Set<string>): void {
+    this.clearComponentTint();
+    for (const eid of entityIds) {
+      const group = this.faceGroups.get(eid);
+      if (!group) continue;
+      group.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          const mat = child.material as THREE.MeshStandardMaterial;
+          (mat as any)._preTintColor = mat.color.clone();
+          mat.color.lerp(_selTint, 0.25);
+        }
+      });
+      this._tintedFaceIds.add(eid);
+    }
+  }
+
+  clearComponentTint(): void {
+    for (const eid of this._tintedFaceIds) {
+      const group = this.faceGroups.get(eid);
+      if (!group) continue;
+      group.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          const mat = child.material as THREE.MeshStandardMaterial;
+          if ((mat as any)._preTintColor) {
+            mat.color.copy((mat as any)._preTintColor);
+            delete (mat as any)._preTintColor;
+          }
+        }
+      });
+    }
+    this._tintedFaceIds.clear();
   }
 
   private syncFace(id: string, face: IFace): void {

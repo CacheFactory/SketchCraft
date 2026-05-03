@@ -39,6 +39,9 @@ import { SectionPlaneTool } from '../tool.section_plane/SectionPlaneTool';
 import { SolidToolsTool } from '../tool.solid_tools/SolidToolsTool';
 import { AxesTool } from '../tool.axes/AxesTool';
 import { ModelAPI, IModelAPI } from '../api.model/ModelAPI';
+import { dimensionStore } from '../tool.dimension/DimensionStore';
+import type { HistoryManager, DimensionDelta } from '../data.history/HistoryManager';
+import type { GuideLineDelta } from '../data.history/DeltaRecorder';
 // @archigraph file.obj-format
 import { importObj, parseMtl, mergeCoplanarFaces } from '../file.obj/ObjFormat';
 import type { ObjImportResult, ObjMaterial } from '../file.obj/ObjFormat';
@@ -54,6 +57,9 @@ export class Application implements IApplication {
 
   private initialized = false;
   private _componentBBoxLines: string[] = [];
+  /** Entity IDs that existed when we started editing a component. */
+  private _preEditEntityIds: Set<string> | null = null;
+  private _preEditComponentId: string | null = null;
 
   async initialize(container: HTMLElement): Promise<void> {
     if (this.initialized) return;
@@ -100,7 +106,11 @@ export class Application implements IApplication {
     // 7. Default to select tool
     this.toolManager.activateTool('tool.select');
 
-    // 8. Listen for IPC menu actions
+    // 8. Wire dimension and guide line undo/redo
+    this.setupDimensionUndoRedo();
+    this.setupGuideLineUndoRedo();
+
+    // 9. Listen for IPC menu actions
     this.setupIPCListeners();
 
     this.initialized = true;
@@ -142,6 +152,149 @@ export class Application implements IApplication {
     for (const tool of tools) {
       this.toolManager.registerTool(tool);
     }
+  }
+
+  private setupDimensionUndoRedo(): void {
+    const hm = this.document.history as HistoryManager;
+    hm.setDimensionHandlers(
+      // getSnapshot: serialize all current dimensions (no Three.js objects)
+      () => {
+        const snap = new Map<string, DimensionDelta>();
+        for (const dim of dimensionStore.all()) {
+          snap.set(dim.id, {
+            id: dim.id,
+            startVertexId: dim.startVertexId,
+            endVertexId: dim.endVertexId,
+            startPoint: { ...dim.startPoint },
+            endPoint: { ...dim.endPoint },
+            offsetDir: { ...dim.offsetDir },
+            offsetDist: dim.offsetDist,
+            textPosition: { ...dim.textPosition },
+            distance: dim.distance,
+            guideLineIds: [...dim.guideLineIds],
+          });
+        }
+        return snap;
+      },
+      // onRestore: add back removed dimensions, remove added dimensions
+      (added, removed) => {
+        // Remove dimensions that were added in this transaction
+        for (const id of removed) {
+          const dim = dimensionStore.remove(id);
+          if (dim) {
+            for (const lineId of dim.guideLineIds) {
+              this.viewport.renderer.removeGuideLine(lineId);
+            }
+            if (dim.sprite.parent) dim.sprite.parent.remove(dim.sprite);
+            (dim.sprite.material as any).map?.dispose();
+            dim.sprite.material.dispose();
+            (this.viewport.renderer as any).unregisterEntityObject?.(dim.id);
+          }
+        }
+        // Re-create dimensions that were removed in this transaction
+        for (const dd of added) {
+          this.recreateDimension(dd);
+        }
+      },
+    );
+  }
+
+  /** Recreate a dimension from serialized data (for undo/redo). */
+  private recreateDimension(dd: DimensionDelta): void {
+    const { vec3 } = require('../../src/core/math');
+    const { formatDistance, getCurrentUnit } = require('../../src/core/units');
+    const THREE = require('three');
+
+    const dimColor = { r: 0.2, g: 0.2, b: 0.2 };
+    const tickSize = 0.08;
+
+    // Recreate guide lines
+    const dir = dd.offsetDir;
+    const dimStart = vec3.add(dd.startPoint, vec3.mul(dir, dd.offsetDist));
+    const dimEnd = vec3.add(dd.endPoint, vec3.mul(dir, dd.offsetDist));
+
+    if (dd.guideLineIds.length >= 5) {
+      this.viewport.renderer.addGuideLine(dd.guideLineIds[0], dd.startPoint, dimStart, dimColor, true);
+      this.viewport.renderer.addGuideLine(dd.guideLineIds[1], dd.endPoint, dimEnd, dimColor, true);
+      this.viewport.renderer.addGuideLine(dd.guideLineIds[2], dimStart, dimEnd, dimColor, false);
+
+      const tick1a = vec3.add(dimStart, vec3.mul(dir, tickSize));
+      const tick1b = vec3.add(dimStart, vec3.mul(dir, -tickSize));
+      this.viewport.renderer.addGuideLine(dd.guideLineIds[3], tick1a, tick1b, dimColor, false);
+
+      const tick2a = vec3.add(dimEnd, vec3.mul(dir, tickSize));
+      const tick2b = vec3.add(dimEnd, vec3.mul(dir, -tickSize));
+      this.viewport.renderer.addGuideLine(dd.guideLineIds[4], tick2a, tick2b, dimColor, false);
+    }
+
+    // Recreate text sprite
+    const text = formatDistance(dd.distance, getCurrentUnit());
+    const sprite = this.createDimensionSprite(dd.id, text, dd.textPosition);
+    if (sprite) {
+      dimensionStore.add({
+        ...dd,
+        sprite,
+      });
+    }
+  }
+
+  /** Create a dimension text sprite (shared helper for undo/redo recreation). */
+  private createDimensionSprite(dimId: string, text: string, position: { x: number; y: number; z: number }): THREE.Sprite | null {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const fontSize = 36;
+    const padding = 8;
+    ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const metrics = ctx.measureText(text);
+    canvas.width = metrics.width + padding * 2;
+    canvas.height = fontSize + padding * 2;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, canvas.width, canvas.height, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillStyle = '#333333';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, sizeAttenuation: true });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(position.x, position.y, position.z);
+    sprite.scale.set(canvas.width / 250, canvas.height / 250, 1);
+    sprite.name = dimId;
+    sprite.userData.entityId = dimId;
+    sprite.userData.entityType = 'dimension';
+
+    const overlayScene = (this.viewport.renderer as any).getOverlayScene?.();
+    if (overlayScene) overlayScene.add(sprite);
+    else {
+      const scene = (this.viewport.renderer as any).getScene?.();
+      if (scene) scene.add(sprite);
+    }
+    (this.viewport.renderer as any).registerEntityObject?.(dimId, sprite);
+
+    return sprite;
+  }
+
+  private setupGuideLineUndoRedo(): void {
+    const hm = this.document.history as HistoryManager;
+    hm.setGuideLineHandler((added, removed) => {
+      for (const id of removed) {
+        this.viewport.renderer.removeGuideLine(id);
+      }
+      for (const guide of added) {
+        this.viewport.renderer.addGuideLine(guide.id, guide.start, guide.end, guide.color, guide.dashed);
+      }
+    });
   }
 
   private setupIPCListeners(): void {
@@ -205,6 +358,59 @@ export class Application implements IApplication {
     }
     this.sceneBridge.sync(force);
     this.syncDimensions();
+    this.adoptNewEntities();
+  }
+
+  /** If editing a component, add any newly created faces/edges to it. */
+  private adoptNewEntities(): void {
+    const sm = this.document.scene as any;
+    const editingId = sm?.editingComponentId ?? null;
+
+    // Detect when we start or stop editing a component
+    if (editingId !== this._preEditComponentId) {
+      if (editingId) {
+        // Just entered a component — snapshot all current entity IDs
+        const mesh = this.document.geometry.getMesh();
+        this._preEditEntityIds = new Set<string>();
+        for (const [id] of mesh.faces) this._preEditEntityIds.add(id);
+        for (const [id] of mesh.edges) this._preEditEntityIds.add(id);
+      } else {
+        this._preEditEntityIds = null;
+      }
+      this._preEditComponentId = editingId;
+    }
+
+    if (!editingId || !this._preEditEntityIds) return;
+    const comp = sm.components.get(editingId);
+    if (!comp) return;
+
+    // Only adopt entities that were created AFTER we started editing
+    const mesh = this.document.geometry.getMesh();
+    let added = 0;
+    for (const [faceId] of mesh.faces) {
+      if (!this._preEditEntityIds.has(faceId) && !comp.entityIds.has(faceId)) {
+        comp.entityIds.add(faceId);
+        this._preEditEntityIds.add(faceId); // don't re-add next sync
+        added++;
+      }
+    }
+    for (const [edgeId] of mesh.edges) {
+      if (!this._preEditEntityIds.has(edgeId) && !comp.entityIds.has(edgeId)) {
+        comp.entityIds.add(edgeId);
+        this._preEditEntityIds.add(edgeId);
+        added++;
+      }
+    }
+    if (added > 0) {
+      // Also add to all ancestor components in the hierarchy
+      let parentId = comp.parentComponentId;
+      while (parentId) {
+        const parent = sm.components.get(parentId);
+        if (!parent) break;
+        for (const eid of comp.entityIds) parent.entityIds.add(eid);
+        parentId = parent.parentComponentId;
+      }
+    }
   }
 
   /** Update associative dimensions when geometry moves, remove orphaned ones on undo. */
@@ -264,7 +470,6 @@ export class Application implements IApplication {
     // Extraction creates individual Three.js objects per face which kills performance.
     // Use batched highlighting (color tint) for larger components instead of extraction.
     const MAX_EXTRACT_FACES = 500; // Cap for extraction (creates individual Three.js objects)
-    const MAX_HIGHLIGHT_FACES = 50000; // Cap for batched tint highlighting
 
     if (this.sceneBridge.batchedMode) {
       // Only extract small selections — large component extraction kills performance
@@ -301,18 +506,20 @@ export class Application implements IApplication {
     }
     this._componentBBoxLines = [];
 
-    // Resolve selection: individual entities get highlight, components get bounding box
+    // Resolve selection: individual entities get highlight, components get bounding box + color tint
+    this.sceneBridge.clearComponentTint();
     const highlightIds: string[] = [];
     for (const id of ids) {
       if (sm?.components?.has(id)) {
-        // Draw bounding box wireframe for this component
         this._drawComponentBBox(id, sm);
+        const comp = sm.components.get(id);
+        if (comp) this.sceneBridge.tintComponentFaces(comp.entityIds);
       } else {
         highlightIds.push(id);
       }
     }
 
-    // Update 3D selection highlights (for non-component entities)
+    // Update 3D selection highlights
     const t1 = performance.now();
     this.viewport.renderer.setSelectionHighlight(highlightIds);
     const dt1 = performance.now() - t1;

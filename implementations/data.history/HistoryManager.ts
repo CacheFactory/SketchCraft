@@ -6,9 +6,23 @@ import { v4 as uuid } from 'uuid';
 import { SimpleEventEmitter } from '../../src/core/events';
 import { ITransaction, IHistoryManager } from '../../src/core/interfaces';
 import { Vec3 } from '../../src/core/types';
-import { DeltaRecorder, DeltaTransaction, DeltaOp, cloneVertex } from './DeltaRecorder';
+import { DeltaRecorder, DeltaTransaction, DeltaOp, GuideLineDelta, cloneVertex } from './DeltaRecorder';
 import type { HalfEdgeMesh } from '../mesh.halfedge/HalfEdgeMesh';
 import type { MaterialManager } from '../data.materials/MaterialManager';
+
+/** Serializable dimension data for undo/redo (no Three.js objects). */
+export interface DimensionDelta {
+  id: string;
+  startVertexId: string | null;
+  endVertexId: string | null;
+  startPoint: Vec3;
+  endPoint: Vec3;
+  offsetDir: Vec3;
+  offsetDist: number;
+  textPosition: Vec3;
+  distance: number;
+  guideLineIds: string[];
+}
 
 function debugLog(_msg: string): void {
   // Uncomment for debugging: console.warn(`[History] ${_msg}`);
@@ -35,6 +49,35 @@ export class HistoryManager implements IHistoryManager {
   // Vertex position snapshots for tools that mutate positions directly (move/rotate/scale)
   private _vertexSnapshots: Map<string, Vec3> | null = null;
 
+  // Dimension undo/redo support
+  private _dimensionsBefore: Map<string, DimensionDelta> | null = null;
+  private _onDimensionUndo: ((added: DimensionDelta[], removed: string[]) => void) | null = null;
+
+  private _getDimensionSnapshot: (() => Map<string, DimensionDelta>) | null = null;
+
+  // Guide line undo/redo support
+  private _pendingGuideLines: GuideLineDelta[] = [];
+  private _onGuideLineUndo: ((added: GuideLineDelta[], removed: string[]) => void) | null = null;
+
+  /** Register callbacks for dimension undo/redo. */
+  setDimensionHandlers(
+    getSnapshot: () => Map<string, DimensionDelta>,
+    onRestore: (added: DimensionDelta[], removed: string[]) => void,
+  ): void {
+    this._getDimensionSnapshot = getSnapshot;
+    this._onDimensionUndo = onRestore;
+  }
+
+  /** Register callback for guide line undo/redo. */
+  setGuideLineHandler(handler: (added: GuideLineDelta[], removed: string[]) => void): void {
+    this._onGuideLineUndo = handler;
+  }
+
+  /** Record a guide line creation during a transaction. */
+  recordGuideLine(guide: GuideLineDelta): void {
+    this._pendingGuideLines.push(guide);
+  }
+
   /** Wire up the tracked data sources. Call after construction and after deserialize. */
   setTrackedSources(mesh: HalfEdgeMesh, materials: MaterialManager): void {
     this.mesh = mesh;
@@ -60,6 +103,12 @@ export class HistoryManager implements IHistoryManager {
       timestamp: Date.now(),
       recorder,
     };
+
+    // Auto-snapshot dimensions at begin time
+    if (this._getDimensionSnapshot) {
+      this._dimensionsBefore = this._getDimensionSnapshot();
+    }
+
     debugLog(`beginTransaction "${name}" mesh: v=${this.mesh?.vertices.size} e=${this.mesh?.edges.size} f=${this.mesh?.faces.size} he=${this.mesh?.halfEdges.size}`);
   }
 
@@ -125,11 +174,28 @@ export class HistoryManager implements IHistoryManager {
     if (this.mesh) this.mesh.setRecorder(null);
     if (this.materials) this.materials.setRecorder(null);
 
+    // Capture dimension after-state
+    const dimAfter = this._getDimensionSnapshot ? this._getDimensionSnapshot() : undefined;
+    const dimBefore = this._dimensionsBefore ?? undefined;
+    this._dimensionsBefore = null;
+
+    // Only store dimension snapshots if they actually changed
+    const dimChanged = dimBefore && dimAfter && (dimBefore.size !== dimAfter.size ||
+      [...dimAfter.keys()].some(k => !dimBefore.has(k)) ||
+      [...dimBefore.keys()].some(k => !dimAfter.has(k)));
+
+    // Capture guide lines
+    const guideLines = this._pendingGuideLines.length > 0 ? [...this._pendingGuideLines] : undefined;
+    this._pendingGuideLines = [];
+
     const tx: DeltaTransaction = {
       id,
       name,
       timestamp,
       deltas: recorder.deltas,
+      dimensionsBefore: dimChanged ? dimBefore : undefined,
+      dimensionsAfter: dimChanged ? dimAfter : undefined,
+      guideLines,
     };
 
     debugLog(`commit "${name}": ${tx.deltas.length} deltas`);
@@ -192,6 +258,26 @@ export class HistoryManager implements IHistoryManager {
 
     if (this.mesh) this.mesh.rebuildLookups();
 
+    // Restore dimensions to before-state
+    if (tx.dimensionsBefore && tx.dimensionsAfter && this._onDimensionUndo) {
+      const added: DimensionDelta[] = [];
+      const removed: string[] = [];
+      for (const [id] of tx.dimensionsAfter) {
+        if (!tx.dimensionsBefore.has(id)) removed.push(id as string);
+      }
+      for (const [id, dim] of tx.dimensionsBefore) {
+        if (!tx.dimensionsAfter.has(id)) added.push(dim as DimensionDelta);
+      }
+      if (added.length > 0 || removed.length > 0) {
+        this._onDimensionUndo(added, removed);
+      }
+    }
+
+    // Undo guide lines: remove them
+    if (tx.guideLines && this._onGuideLineUndo) {
+      this._onGuideLineUndo([], tx.guideLines.map(g => g.id));
+    }
+
     this.redoStack.push(tx);
     this.emitter.emit('changed');
     return { id: tx.id, name: tx.name, timestamp: tx.timestamp };
@@ -204,6 +290,26 @@ export class HistoryManager implements IHistoryManager {
     this.applyForward(tx.deltas);
 
     if (this.mesh) this.mesh.rebuildLookups();
+
+    // Restore dimensions to after-state
+    if (tx.dimensionsBefore && tx.dimensionsAfter && this._onDimensionUndo) {
+      const added: DimensionDelta[] = [];
+      const removed: string[] = [];
+      for (const [id] of tx.dimensionsBefore) {
+        if (!tx.dimensionsAfter.has(id)) removed.push(id as string);
+      }
+      for (const [id, dim] of tx.dimensionsAfter) {
+        if (!tx.dimensionsBefore.has(id)) added.push(dim as DimensionDelta);
+      }
+      if (added.length > 0 || removed.length > 0) {
+        this._onDimensionUndo(added, removed);
+      }
+    }
+
+    // Redo guide lines: re-create them
+    if (tx.guideLines && this._onGuideLineUndo) {
+      this._onGuideLineUndo(tx.guideLines, []);
+    }
 
     this.undoStack.push(tx);
     this.emitter.emit('changed');

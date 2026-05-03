@@ -248,6 +248,13 @@ export class PushPullTool extends BaseTool {
 
     const offset = vec3.mul(this.faceNormal, this.currentDistance);
 
+    const face = this.document.geometry.getFace(this.selectedFaceId);
+    if (!face) {
+      this.abortTransaction();
+      this.reset();
+      return;
+    }
+
     if (this.hasSideWalls(this.selectedFaceId, this.faceNormal)) {
       // 3D mode: just move existing vertices, side walls stretch automatically
       for (const v of faceVertices) {
@@ -255,31 +262,67 @@ export class PushPullTool extends BaseTool {
       }
     } else {
       // 2D mode: extrude — create side walls and top cap
-      const newVertexIds: string[] = [];
+      // Build vertex map: original ID → new extruded vertex ID
+      const vertexMap = new Map<string, string>();
       for (const v of faceVertices) {
         const newPos = vec3.add(v.position, offset);
         const newVertex = this.document.geometry.createVertex(newPos);
-        newVertexIds.push(newVertex.id);
+        vertexMap.set(v.id, newVertex.id);
       }
 
-      const n = faceVertices.length;
-      for (let i = 0; i < n; i++) {
-        const next = (i + 1) % n;
-        const bottomA = faceVertices[i].id;
-        const bottomB = faceVertices[next].id;
-        const topA = newVertexIds[i];
-        const topB = newVertexIds[next];
+      // Split vertexIds into separate loops (outer boundary + holes)
+      const allVertexIds = face.vertexIds;
+      const holeStarts = face.holeStartIndices && face.holeStartIndices.length > 0
+        ? [...face.holeStartIndices].sort((a, b) => a - b)
+        : [];
+      const loopBounds = [0, ...holeStarts, allVertexIds.length];
+      const loops: string[][] = [];
+      for (let li = 0; li < loopBounds.length - 1; li++) {
+        loops.push(allVertexIds.slice(loopBounds[li], loopBounds[li + 1]));
+      }
 
-        this.document.geometry.createEdge(bottomA, topA);
-        this.document.geometry.createEdge(topA, topB);
-        if (i === n - 1) {
-          this.document.geometry.createEdge(bottomB, topB);
+      // Create side walls for each loop
+      for (let li = 0; li < loops.length; li++) {
+        const loop = loops[li];
+        const isHole = li > 0;
+
+        for (let i = 0; i < loop.length; i++) {
+          const next = (i + 1) % loop.length;
+          const bottomA = loop[i];
+          const bottomB = loop[next];
+          const topA = vertexMap.get(bottomA)!;
+          const topB = vertexMap.get(bottomB)!;
+
+          this.document.geometry.createEdge(bottomA, topA);
+          this.document.geometry.createEdge(topA, topB);
+          if (i === loop.length - 1) {
+            this.document.geometry.createEdge(bottomB, topB);
+          }
+
+          // Reverse winding for holes so normals face into the opening
+          if (isHole) {
+            this.document.geometry.createFace([bottomA, topA, topB, bottomB]);
+          } else {
+            this.document.geometry.createFace([bottomA, bottomB, topB, topA]);
+          }
         }
-
-        this.document.geometry.createFace([bottomA, bottomB, topB, topA]);
       }
 
-      this.document.geometry.createFace(newVertexIds);
+      // Create the top cap face (outer loop only, then append holes)
+      const outerLoop = loops[0];
+      const topCapOuter = outerLoop.map(vid => vertexMap.get(vid)!);
+      const topFace = this.document.geometry.createFace(topCapOuter);
+
+      if (loops.length > 1) {
+        for (let li = 1; li < loops.length; li++) {
+          const holeStart = topFace.vertexIds.length;
+          const topHoleVerts = loops[li].map(vid => vertexMap.get(vid)!);
+          topFace.vertexIds.push(...topHoleVerts);
+          if (!topFace.holeStartIndices) topFace.holeStartIndices = [];
+          topFace.holeStartIndices.push(holeStart);
+        }
+        topFace.generation = Date.now();
+      }
     }
 
     this.commitTransaction();

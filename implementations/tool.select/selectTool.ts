@@ -107,6 +107,17 @@ export class SelectTool extends BaseTool {
 
     // Instant point-pick using the pre-computed raycast hit
     if (event.hitEntityId) {
+      // When editing a component, only allow selecting entities within it
+      const sm = this.document.scene as any;
+      if (sm?.editingComponentId && !sm.components?.has(event.hitEntityId)) {
+        // It's a raw entity (not a component) — check if it's editable in current context
+        if (sm.isEntityEditable && !sm.isEntityEditable(event.hitEntityId)) {
+          if (!event.shiftKey) this.document.selection.clear();
+          this.setStatus('Click geometry inside the component, or press Escape to exit.');
+          return;
+        }
+      }
+
       // Expand to full curve if the clicked edge belongs to one
       const idsToSelect = this.expandCurve(event.hitEntityId);
       if (event.shiftKey) {
@@ -166,8 +177,14 @@ export class SelectTool extends BaseTool {
     if (this.phase === 'idle') {
       // Pre-selection highlight + cursor change
       if (event.hitEntityId) {
-        // Show move cursor for dimension entities
-        if (dimensionStore.isDimensionEntity(event.hitEntityId)) {
+        // When editing a component, skip pre-selection for entities outside it
+        const sm2 = this.document.scene as any;
+        if (sm2?.editingComponentId && !sm2.components?.has(event.hitEntityId) &&
+            sm2.isEntityEditable && !sm2.isEntityEditable(event.hitEntityId)) {
+          this.document.selection.setPreSelection(null);
+          this.setCursorPointer(false);
+        } else if (dimensionStore.isDimensionEntity(event.hitEntityId)) {
+          // Show move cursor for dimension entities
           this.setCursorPointer(true);
         } else {
           // Expand to full curve for pre-selection highlight

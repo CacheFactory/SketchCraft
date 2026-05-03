@@ -690,7 +690,9 @@ nodes:
     docs:
       description: "Click two points to measure distance. Live preview line during placement.\n          Creates dashed construction\
         \ guide line between measured points. VCB input for exact distance\n          in current cursor direction. Uses getStandardDrawPoint\
-        \ and findOrCreateVertex from BaseTool.\n          Supports arrow key plane switching."
+        \ and findOrCreateVertex from BaseTool.\n          Supports arrow key plane switching. Fully undoable — wraps measurement\n\
+        \          in beginTransaction/commitTransaction and records guide lines via\n          HistoryManager.recordGuideLine()\
+        \ for undo/redo support."
   uuid: 9yqt3Wjr
 - id: tool.protractor
   kind: tool
@@ -751,7 +753,9 @@ nodes:
         \        1 decimal place via formatDistance(). Dimensions are selectable and movable (constrained\n\
         \        perpendicular to measurement line). Associative — tracks vertex IDs and updates when\n\
         \        geometry moves. DimensionStore.syncToGeometry() updates sprite text with current units.\n\
-        \        Supports undo. Uses DimensionStore singleton for state management."
+        \        Fully undoable — HistoryManager snapshots DimensionDelta (serializable, no Three.js objects)\n\
+        \        at begin/commit time. Undo removes dimensions and guide lines; redo recreates them\n\
+        \        via Application.recreateDimension(). Uses DimensionStore singleton for state management."
   uuid: gHVP0JyU
 - id: tool.text
   kind: tool
@@ -956,8 +960,12 @@ nodes:
         \        Component visuals: syncComponentBoxes() draws bounding boxes (purple=normal, blue=editing),\n\
         \        uses unit-box with scale transform instead of allocating new BoxGeometry each frame,\n\
         \        skips components whose vertices don't overlap the dirty set.\n\
-        \        syncComponentDimming() sets opacity=0.15 on faces/edges outside the editing component,\n\
-        \        restores full opacity on exit. Edge dimming clones material per-edge to avoid shared mutation."
+        \        syncComponentDimming() uses color tinting (lerp toward gray, 0.8 factor) on faces outside\n\
+        \        the editing component — no transparency overhead. Edges outside get lightened color.\n\
+        \        Restores original colors on exit. Separate _origColor (dimming) and _preTintColor\n\
+        \        (selection tinting) prevent conflicts. tintComponentFaces() lerps selected component\n\
+        \        faces toward blue (0.25 factor) for selection feedback without expanding entity IDs\n\
+        \        through the highlight pipeline — major performance improvement for large components."
       notes: "## Typed Interface\n\n```typescript\nimport * as THREE from 'three';\nimport { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';\n\
         import { HalfEdgeMesh, GPUBufferData } from '../geometry/mesh';\nimport { ISceneManager, Group, ComponentInstance\
         \ } from '../data/scene';\nimport { ISelectionManager } from '../data/selection';\nimport { IMaterialManager, Material\
@@ -1764,9 +1772,14 @@ nodes:
         Undo applies inverse deltas in reverse order; redo applies forward deltas. O(1) begin/commit for most
         operations. Move/rotate/scale tools use snapshotVertices() for direct position mutations. ModelDocument
         re-wires setTrackedSources() after any geometry.deserialize() call that replaces the internal mesh.
-      notes: "## Key Files\n- `DeltaRecorder.ts` — DeltaOp type, DeltaRecorder class, entity clone helpers\n\
+        Dimension undo/redo via DimensionDelta snapshots (serializable, no Three.js objects) — setDimensionHandlers()
+        registers getSnapshot/onRestore callbacks. Guide line undo/redo via GuideLineDelta — setGuideLineHandler()
+        registers add/remove callback. Both are stored on DeltaTransaction and applied during undo/redo.
+      notes: "## Key Files\n- `DeltaRecorder.ts` — DeltaOp type, DeltaRecorder class, GuideLineDelta interface,\
+        \ entity clone helpers\n\
         - `TrackedMap.ts` — Map subclass that intercepts get/set/delete/iteration to capture deltas\n- `HistoryManager.ts`\
-        \ — Transaction lifecycle, applyInverse/applyForward, vertex snapshots\n\n## Design Decisions\n- **Delta-based**:\
+        \ — Transaction lifecycle, applyInverse/applyForward, vertex snapshots, DimensionDelta interface,\
+        \ dimension/guide line snapshot and restore callbacks\n\n## Design Decisions\n- **Delta-based**:\
         \ Each transaction stores only changed entities (~KB), not full mesh snapshots (~57MB for large models).\n\
         - **TrackedMap instrumentation**: Intercepts set(), delete(), get(), forEach(), entries(), values(),\
         \ and [Symbol.iterator]() to capture before-snapshots on first access during a transaction.\n- **Deferred\

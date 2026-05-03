@@ -5,6 +5,7 @@ import type { Vec3 } from '../../src/core/types';
 import type { ToolMouseEvent, ToolKeyEvent, ToolPreview } from '../../src/core/interfaces';
 import { vec3 } from '../../src/core/math';
 import { BaseTool } from '../tool.select/BaseTool';
+import type { HistoryManager } from '../data.history/HistoryManager';
 
 export class TapeMeasureTool extends BaseTool {
   readonly id = 'tool.tape_measure';
@@ -116,6 +117,8 @@ export class TapeMeasureTool extends BaseTool {
   private completeMeasurement(endPoint: Vec3): void {
     if (!this.startPoint) return;
 
+    this.beginTransaction('Tape Measure');
+
     const dist = vec3.distance(this.startPoint, endPoint);
     this.findOrCreateVertex(endPoint);
 
@@ -126,15 +129,22 @@ export class TapeMeasureTool extends BaseTool {
     // Create a construction guide line between the two points
     if (this.createGuides) {
       // @archigraph calls|tool.tape_measure|data.scene|interaction
-      this.viewport.renderer.addGuideLine(
-        `guide-${Date.now()}`,
-        this.startPoint,
-        endPoint,
-        { r: 0, g: 0, b: 0, a: 0.5 },
-        true,
-      );
+      const guideId = `guide-${Date.now()}`;
+      const guideColor = { r: 0, g: 0, b: 0, a: 0.5 };
+      this.viewport.renderer.addGuideLine(guideId, this.startPoint, endPoint, guideColor, true);
+
+      // Record for undo/redo
+      const hm = this.document.history as HistoryManager;
+      hm.recordGuideLine({
+        id: guideId,
+        start: { ...this.startPoint },
+        end: { ...endPoint },
+        color: guideColor,
+        dashed: true,
+      });
     }
 
+    this.commitTransaction();
     this.reset();
   }
 
